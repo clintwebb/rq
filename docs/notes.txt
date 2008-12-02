@@ -1,0 +1,173 @@
+RQ
+
+RISP based message queue.  Message queues are basically used to communicate 
+between processes that perform specific tasks.
+
+The general idea is that you can have multiple processes that perform the 
+work.  In theory this means that you can simply startup enough processes to 
+handle the load.  As more data needs arise, simply start up more processes.
+
+All queue events would require some core info.  We also dont want to have 
+complicated configs to manage the queues.  it should all be done dynamically 
+by the server processes themselves.
+
+When a process starts up, it connects to the controller and indicates what 
+interactions it intends.  For example, the process might be a publisher and a 
+consumer.  When it publishes, it might want the request to go to one process 
+in the pool, or be broadcast to all procs in the pool.
+
+The payload of a queue event is just a binary blob of data (which could 
+contain RISP commands to be processed).  The event system is basically just 
+an advanced packet delivery system.
+
+Each Request can expect one or more Responces.  The responce to a query 
+should go back to the process that made the request.
+
+This means that you can have hundreds of processes performing very specific 
+tasks, over a large number of physical systems.
+
+The client code is basically supposed to be entirely event-based.  When it is 
+not actually processing something, it should be in a WAIT state and not use 
+any CPU.
+
+So therefore, we want to have callbacks for commands & responces.  When the 
+responce comes in, it should be paired with existing data and continue 
+processing.
+
+The main idea is that everything is event based.  Should also be able to 
+trigger an event on a timed basis.  There should not be any calls that are 
+blocking either.  Make the request and then wait for a reply to come in.
+
+This msg queue system should be run on libevent so that other socket based 
+operations can happen at the same time.
+
+When a proc is given a command it will not be given any more commands until 
+it has replied to that one.  Although, when it subscribes to a queue it could 
+specify how many commands it can be sent at a time.
+
+Some generic procs:
+ - http downloader
+ - http server listener
+ - lock server
+ - logger
+
+A lock server could be used whenever you have a situation where certain 
+activities shouldn't be interrupted (over the entire cluster).  It would work 
+the same as a mutex, but over multiple processes.  Although generally, you 
+would want to try and design the system so it uses locks sparingly.
+
+Each process would have a generic interface and layout that is generically 
+the same.  When a request comes in, you would store the details about it, and 
+give itself a integer handle.  Then it would call a function, that attempts 
+to process that handle.  If there is more information it needs from other 
+sources, it will do it and wait for those responce packets.  It will get the 
+info out of the packet and process them.
+
+Should each proc have its own connection to the database, or should it 
+communicate with a datastore service?
+
+----
+
+To get a bit more complicated, we would like to have a backup controller in 
+case one fails.  The clients would only connect to the master controller.  If 
+the connection is lost then it will immediately jump to the secondary server.  
+This means that some clients may jump, but not all.  Therefore, we need a 
+system where a copy of all events will need to be sent to the other servers 
+in the cluster.  We would need to add servers to the cluster without bringing 
+down the cluster.
+
+So how do we make it so that controllers can pass events to other 
+controllers?  If there are no subscribers to a queue on the controller it 
+would pass the event to one of the other controllers.  Especially if we have 
+more than 2 controllers.  If there are two controllers connected, that have 
+indicated a subscription for a queue then they would go in the list, and 
+would only receive messages if there are no other processes connected for 
+that queue.  Maybe we should work on a simple priority system.  If a server 
+is being heavily used, it can send a message back to the controller lowering 
+its priority.  When its workload is reduced it can raise the priority back up 
+again.  A controller can start off with a low priority for the queue.
+
+----
+
+As an example.
+
+Controller X1 starts up.  It doesn't know anything about anything yet.
+Client AA starts up and connects to X1.  
+AA subscribes to the Queue 'Members', and indicates that it can handle 5 requests max, with a normal priority (10).
+BB starts up and connects to X1.
+BB subscribes to the Queue 'Posts', 5 requests max, normal priority.
+CC starts up and connects to X1.
+CC establishes a listening socket for HTTP commands.
+CC receives a HTTP connection, reads in the data, and sends a Member info request to the Members queue.
+X1 passes the request on to Client AA.  
+AA recieves the request which has a unique ID supplied with it (but doesn't have any actual information about Client CC in it, X1 is keeping track of that).
+AA processes the request, and responds with data, sending it back to X1.
+X1 receives the reply from AA.  Looks up its table and sees that it came from CC.
+X1 sends the reply to CC.  (There is no info in the message to indicate where the reply came from.  CC does not know anything about AA, only X1).
+CC receives the reply, decodes it, and then sends out HTTP data to the remote connection.
+
+If one 'Members' processing server is not enough to handle the load, then we can fire up a second one... 
+
+DD starts up and connects to X1.
+DD subscribes to the queue 'Members'.
+CC receives a HTTP request, and makes a query to the 'Members' queue.
+CC sends request to 'Members' queue on X1.
+X1 receives a request to the 'Members' queue.
+X1 looks in its tables and sees that AA and DD both consume the Members queue.  It chooses one to send to (based on last use, priority, max, and buffered 
+limit) and sends the request to it.
+
+If both AA and DD were both maxed out on processing events for the Members queue, then X1 will buffer the request until one of them are available.
+
+Now we get tricky.
+
+We fire up a second controller... X2.
+X2 starts up, it doesnt know anything about anything, but it does know that it should connect to X1.
+X2 connects to X1.
+X1 receives the connection, and adds X2 to its 'Controllers' list.
+X1 tells X2 that it has a 'Members' consumer.
+X1 tells X2 that it has a 'Posts' consumer.
+
+Client EE starts up, and connects to X2.
+EE subscribes to the Queue 'Posts', 5 requests max, normal priority.
+X2 tells X1 that it has a 'Posts' consumer.
+X1 adds X2 to its list for 'Posts' but with a low priority, no max.
+CC receives a HTTP connections, reads in the data and sends a Post info request to teh 'Posts' queue.
+X1 receives the request to the 'Posts' queue.
+X1 looks in its table and sees that BB and X2 can handle Posts.
+X1 sees that even though BB has a higher priority, it is full, so X1 sends the request to X2.
+X2 receives the 'Posts' message.  It doesnt have any actual information about the source, all it knows is that X1 sent it.
+X2 looks in its list and sees that X1 and EE handle 'Post' messages.  The message came from X1 so that just leaves EE.
+EE is full, so X2 keeps the message in the buffer.
+EE finishes processing previous messages and return replies.
+X2 receives the replies and processes them.  It reduces the 'active' counter for EE/Posts and can now send it a new message.
+EE receives the 'Posts' message, processes it and returns a reply to X2.
+X2 receives the 'Posts' reply from EE.  
+X2 looks up its info about the Post (from the ID it was given) and passes it on to X1 (who was the original source).
+X1 receives the 'Posts' reply from X2 (given the ID that X1 gave it), and knows that it must pass it on to CC that originally made the request.
+
+There are no MAX limits for REPLIES... only new Requests.  Also, there is no 
+MAX for broadcast messages.
+
+
+-----
+
+What happens if a connection stops responding?  Close it.
+If a controller stops responding, Close it...
+
+The clients should know that if it loses connection to the controller, don't 
+even try the first one, go immediately to the second one. The client should 
+assume the everything it has requested failed... although that might not be 
+the case.  Failures could be a serious problem that we might have to address 
+in the future.
+
+
+
+-----
+
+Cancel a message if the server takes too long to process it.  What would 
+actually constitute 'too long'?  When the request is made, maybe we can 
+include a timeout (in seconds), and the controller should cancel the request 
+after the number of seconds have gone past.  This would be useful if the 
+servers are swamped and the message is still in a controller queue.
+
+
