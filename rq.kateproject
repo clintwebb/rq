@@ -1,0 +1,31 @@
+[Dir docs]
+Dirs=
+Files=notes.txt
+
+[Dir src]
+Dirs=librq/rqd/rq-log
+Files=
+
+[Dir src/librq]
+Dirs=
+Files=rq.h/Makefile/librq.c
+
+[Dir src/rq-log]
+Dirs=docs
+Files=librq-log.c/Makefile/rq-log.c/rq-log.h/log-test.c
+
+[Dir src/rq-log/docs]
+Dirs=
+Files=notes.txt
+
+[Dir src/rqd]
+Dirs=
+Files=rqd.c/Makefile/settings.c/settings.h/stats.c/stats.h/data.c/data.h/node.c/node.h/server.c/server.h/timeout.c/timeout.h/commands.c/commands.h/process.c/process.h
+
+[Project Dir]
+Dirs=docs/src
+Files=
+
+[Project File]
+Name=rq
+Type=Default
