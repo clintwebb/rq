@@ -3,20 +3,20 @@
 all: librq.so.1.0.1
 
 ARGS=
+OBJS=librq.o
 
-# Need to be able to make 'man-pages' as well.  Not sure where to get the source for those... 
+librq.o: librq.c rq.h 
+	gcc -c -fPIC librq.c  -o $@ $(ARGS)
 
-librq.o: librq.c rq.h
-	gcc -c -fPIC librq.c -o $@ $(ARGS)
 
-librq.a: librq.o
+librq.a: $(OBJS)
 	@>$@
 	@rm $@
 	ar -r $@
 	ar -r $@ $^
 
-librq.so.1.0.1: librq.o
-	gcc -shared -Wl,-soname,librq.so.1 -o librq.so.1.0.1 librq.o
+librq.so.1.0.1: $(OBJS)
+	gcc -shared -Wl,-soname,librq.so.1 -o librq.so.1.0.1 $(OBJS)
 	
 
 install: librq.so.1.0.1 rq.h
