@@ -15,6 +15,16 @@
 #endif
 
 
+// Since we will be using a number of bit masks to check for data status's and so on, we should include some macros to make it easier.
+#define BIT_TEST(arg,val) (((arg) & (val)) == (val))
+#define BIT_SET(arg,val) ((arg) |= (val))
+#define BIT_CLEAR(arg,val) ((arg) &= ~(val))
+#define BIT_TOGGLE(arg,val) ((arg) ^= (val))
+
+
+
+
+
 
 #define INVALID_HANDLE -1
 
@@ -47,16 +57,20 @@
 #define RQ_CMD_NOP              0
 #define RQ_CMD_CLEAR            1
 #define RQ_CMD_EXECUTE          2
-#define RQ_CMD_REQUEST          3
-#define RQ_CMD_REPLY            4
-#define RQ_CMD_BROADCAST        5
-#define RQ_CMD_NOREPLY          6
-#define RQ_CMD_CONSUME          7
-#define RQ_CMD_CANCEL_QUEUE     8
-#define RQ_CMD_CLOSING          9
-#define RQ_CMD_SERVER_FULL      10
-#define RQ_CMD_KEEP             11
-#define RQ_CMD_CONTROLLER       12
+
+#define RQ_CMD_REQUEST          10
+#define RQ_CMD_REPLY            11
+#define RQ_CMD_RECEIVED         12
+#define RQ_CMD_DELIVERED        13
+#define RQ_CMD_BROADCAST        14
+#define RQ_CMD_NOREPLY          15
+#define RQ_CMD_UNDELIVERED      16
+
+#define RQ_CMD_CONSUME          20
+#define RQ_CMD_CANCEL_QUEUE     21
+#define RQ_CMD_CLOSING          22
+#define RQ_CMD_SERVER_FULL      23
+#define RQ_CMD_CONTROLLER       24
 // byte integer (64 to 95)
 #define RQ_CMD_PRIORITY         64
 // short integer (96 to 127)
@@ -125,8 +139,8 @@ typedef struct {
 	rq_queue_t **queuelist;
 	int queues;
 
-	void *arg;
-	void (*handler)(rq_message_t *msg, void *arg);
+// 	void *arg;
+// 	void (*handler)(rq_message_t *msg, void *arg);
 
 	rq_data_t data;
 } rq_t;
