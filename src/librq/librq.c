@@ -83,7 +83,7 @@ int rq_new_socket(struct addrinfo *ai) {
 
 
 
-
+// based on some code that was used in memcached.
 int rq_daemon(char *username, char *pidfile, int noclose)
 {
 	struct passwd *pw;
@@ -213,6 +213,30 @@ void rq_init(rq_t *rq)
 
 	rq_data_init(&rq->data);
 }
+
+
+void rq_queue_init(rq_queue_t *queue)
+{
+	assert(queue != NULL);
+
+	queue->queue = NULL;
+	queue->qid = 0;
+	queue->handler = NULL;
+	queue->arg = NULL;
+}
+
+void rq_queue_free(rq_queue_t *queue)
+{
+	assert(queue != NULL);
+	if (queue->queue != NULL) {
+		free(queue->queue);
+		queue->queue = NULL;
+	}
+	queue->qid = 0;
+	queue->handler = NULL;
+	queue->arg = NULL;
+}
+
 
 
 void rq_cleanup(rq_t *rq)
@@ -552,6 +576,7 @@ printf("rq(%d) - data received (%d)\n", rq->handle, res);
 static void rq_process_write(rq_t *rq)
 {
 	assert(rq != NULL);
+	assert(0);
 }
 
 static void rq_process_handler(int fd, short int flags, void *arg)
@@ -564,6 +589,9 @@ static void rq_process_handler(int fd, short int flags, void *arg)
 	rq = (rq_t *) arg;
 
 	assert(rq != NULL);
+
+	printf("Processing data: rqh=%d, fd=%d, flags=%d\n", rq->handle, fd, flags);
+	
 	assert(rq->handle == fd);
 
 	if (flags & EV_READ) {
@@ -575,18 +603,6 @@ static void rq_process_handler(int fd, short int flags, void *arg)
 		printf("rq_process_handler(%d, EV_WRITE))\n", fd);
 		rq_process_write(rq);
 	}
-	
-	assert(0);
-
-	// we've received data from the controller... need to read it in, and then parse it thru risp.
-
-
-
-	// when we have a pack of data we need to supply to the service, we create a rq_request_t object.  Then we call the handler for the queue (or the default handler).
-
-	// if the message was a request, then we expect a reply to be added to the rq_request_t object, which we will automatically send back to the 
-
-	
 }
 
 
@@ -648,6 +664,10 @@ static void rq_senddata(rq_t *rq, char *data, int length)
 
 
 
+
+
+
+
 //-----------------------------------------------------------------------------
 // Send a request to the controller indicating a desire to consume a particular
 // queue.  We will add queue information to our RQ structure.
@@ -700,17 +720,18 @@ void rq_consume(rq_t *rq, char *queue, int max, int priority, void (*handler)(rq
 		
 			rq->queuelist = (rq_queue_t **) realloc(rq->queuelist, sizeof(rq_queue_t *) * (rq->queues + 1));
 			rq->queuelist[rq->queues] = NULL;
+			avail = rq->queues;
 			rq->queues ++;
 		}
 
 		assert(avail >= 0);
-		assert(rq->queuelist[rq->queues] == NULL);
-		rq->queuelist[rq->queues] = (rq_queue_t *) malloc(sizeof(rq_queue_t));
-		assert(rq->queuelist[rq->queues] != NULL);
-		rq_queue_init(rq->queuelist[rq->queues]);
-		rq->queuelist[rq->queues]->queue = queue;
-		rq->queuelist[rq->queues]->handler = handler;
-		rq->queuelist[rq->queues]->arg = arg;
+		assert(rq->queuelist[avail] == NULL);
+		rq->queuelist[avail] = (rq_queue_t *) malloc(sizeof(rq_queue_t));
+		assert(rq->queuelist[avail] != NULL);
+		rq_queue_init(rq->queuelist[avail]);
+		rq->queuelist[avail]->queue = queue;
+		rq->queuelist[avail]->handler = handler;
+		rq->queuelist[avail]->arg = arg;
 	}
 	
 	// send consume request to controller.
@@ -743,6 +764,18 @@ static void processClosing(rq_t *rq)
 }
 
 static void processServerFull(rq_t *rq)
+{
+	assert(rq != NULL);
+	assert(0);
+}
+
+static void processDelivered(rq_t *rq)
+{
+	assert(rq != NULL);
+	assert(0);
+}
+
+static void processReceived(rq_t *rq)
 {
 	assert(rq != NULL);
 	assert(0);
@@ -815,6 +848,15 @@ static void cmdExecute(void *ptr)
 
 		case RQ_CMD_SERVER_FULL:
 			processServerFull(rq);
+			break;
+
+		case RQ_CMD_RECEIVED:
+			processReceived(rq);
+			break;
+	
+		case RQ_CMD_DELIVERED:
+			processDelivered(rq);
+			break;
 	
 		default:
 			// what do we do if we dont have a valid operation?
@@ -840,6 +882,30 @@ static void cmdRequest(void *ptr)
 
 	rq->data.op = RQ_CMD_REQUEST;
 	printf("REQUEST\n");
+}
+
+static void cmdReceived(void *ptr)
+{
+	rq_t *rq;
+
+	assert(ptr != NULL);
+	rq = (rq_t *) ptr;
+	assert(rq != NULL);
+
+	rq->data.op = RQ_CMD_RECEIVED;
+	printf("RECEIVED\n");
+}
+
+static void cmdDelivered(void *ptr)
+{
+	rq_t *rq;
+
+	assert(ptr != NULL);
+	rq = (rq_t *) ptr;
+	assert(rq != NULL);
+
+	rq->data.op = RQ_CMD_DELIVERED;
+	printf("DELIVERED\n");
 }
 
 static void cmdBroadcast(void *ptr)
@@ -943,7 +1009,7 @@ static void cmdPriority(void *ptr, risp_int_t value)
 	printf("PRIORITY (%d)\n", value);
 }
 	
-void cmdPayload(void *ptr, risp_length_t length, risp_char_t *data)
+static void cmdPayload(void *ptr, risp_length_t length, risp_char_t *data)
 {
 	rq_t *rq = (rq_t *) ptr;
  	assert(rq != NULL);
@@ -956,7 +1022,7 @@ void cmdPayload(void *ptr, risp_length_t length, risp_char_t *data)
 }
 
 
-void cmdQueue(void *ptr, risp_length_t length, risp_char_t *data)
+static void cmdQueue(void *ptr, risp_length_t length, risp_char_t *data)
 {
 	rq_t *rq = (rq_t *) ptr;
  	assert(rq != NULL);
@@ -967,7 +1033,7 @@ void cmdQueue(void *ptr, risp_length_t length, risp_char_t *data)
 
 }
 
-void cmdInvalid(void *ptr, void *data, risp_length_t len)
+static void cmdInvalid(void *ptr, void *data, risp_length_t len)
 {
 	// this callback is called if we have an invalid command.  We shouldn't be receiving any invalid commands.
 	unsigned char *cast;
@@ -1000,6 +1066,8 @@ void rq_process(rq_t *rq)
 	risp_add_command(rq->risp, RQ_CMD_CLEAR,        &cmdClear);
 	risp_add_command(rq->risp, RQ_CMD_EXECUTE,      &cmdExecute);
 	risp_add_command(rq->risp, RQ_CMD_REQUEST,      &cmdRequest);
+	risp_add_command(rq->risp, RQ_CMD_RECEIVED,     &cmdReceived);
+	risp_add_command(rq->risp, RQ_CMD_DELIVERED,    &cmdDelivered);
   risp_add_command(rq->risp, RQ_CMD_BROADCAST,    &cmdBroadcast);
 	risp_add_command(rq->risp, RQ_CMD_NOREPLY,      &cmdNoreply);
 	risp_add_command(rq->risp, RQ_CMD_CLOSING,      &cmdClosing);
@@ -1133,4 +1201,5 @@ void rq_send(rq_t *rq, rq_message_t *msg)
 
 	assert(0);
 }
+
 
