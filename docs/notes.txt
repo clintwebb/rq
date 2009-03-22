@@ -171,3 +171,12 @@ after the number of seconds have gone past.  This would be useful if the
 servers are swamped and the message is still in a controller queue.
 
 
+----
+
+Should each node provide a unique identifier?   This would assist in storing messages on other controllers when the node needs to be relocated.  However, it means that we would have to do more complex routing of messages.
+
+----
+
+Message pools.
+	Since we will potentially be handling a LOT of messages, we need to make sure that we do not waste a lot of time allocating and then freeing chunks of memory.  We already have the buffer pool, and action pools.  The next thing we will get a lot of is messages, so we should have a pool for that also.   The less we are having to allocate the better.  Managing the pool has a little overhead, but I expect it is drastically better than the cost of malloc and free... not to mention the gradual fragmentation that occurs with a lot of memory allocations.
+
