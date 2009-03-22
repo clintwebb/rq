@@ -203,8 +203,8 @@ void rq_init(rq_t *rq)
 	rq->queuelist = NULL;
 	int queues = 0;
 	
-	rq->arg = NULL;
-	rq->handler = NULL;
+// 	rq->arg = NULL;
+// 	rq->handler = NULL;
 
 	expbuf_init(&rq->readbuf, RQ_DEFAULT_BUFFSIZE);
 	expbuf_init(&rq->in, 0);
@@ -681,7 +681,7 @@ void rq_consume(rq_t *rq, char *queue, int max, int priority, void (*handler)(rq
 	assert(queue != NULL);
 	assert(max >= 0);
 	assert(priority == RQ_PRIORITY_NONE || priority == RQ_PRIORITY_LOW || priority == RQ_PRIORITY_NORMAL || RQ_PRIORITY_HIGH);
-	assert((handler == NULL && arg == NULL) || (handler != NULL));
+	assert(handler != NULL);
 
 	// check that we are connected to a controller.
 	assert(rq->handle != INVALID_HANDLE && rq->connactive >= 0);

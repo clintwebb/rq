@@ -43,7 +43,7 @@
 // The priorities are used to determine which node to send a request to.  A
 // priority of NONE indicates taht this node should only receive broadcast
 // messages, and no actual requests.
-#define RQ_PRIORITY_NONE		0
+#define RQ_PRIORITY_NONE		    0
 #define RQ_PRIORITY_LOW        10
 #define RQ_PRIORITY_NORMAL     20
 #define RQ_PRIORITY_HIGH       30
@@ -73,12 +73,13 @@
 #define RQ_CMD_CONTROLLER       24
 // byte integer (64 to 95)
 #define RQ_CMD_PRIORITY         64
+#define RQ_CMD_RETRIES					65
 // short integer (96 to 127)
-#define RQ_CMD_ID               96
-#define RQ_CMD_QUEUEID          97
-#define RQ_CMD_TIMEOUT          98
-#define RQ_CMD_MAX              99
+#define RQ_CMD_QUEUEID          96
+#define RQ_CMD_TIMEOUT          97
+#define RQ_CMD_MAX              98
 // large integer (128 to 159 
+#define RQ_CMD_ID               128
 // short string (160 to 192)
 #define RQ_CMD_QUEUE            160
 // string (192 to 223)
@@ -138,9 +139,6 @@ typedef struct {
 
 	rq_queue_t **queuelist;
 	int queues;
-
-// 	void *arg;
-// 	void (*handler)(rq_message_t *msg, void *arg);
 
 	rq_data_t data;
 } rq_t;
