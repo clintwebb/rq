@@ -1,0 +1,380 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+
+
+  
+  <meta content="text/html; charset=ISO-8859-1" http-equiv="content-type">
+
+  
+
+
+  <title>RQ Protocol</title>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <meta name="Generator" content="Kate, the KDE Advanced Text Editor">
+</head>
+
+
+<body>
+
+
+<h1>RQ Protocol</h1>
+
+
+
+
+
+
+<br>
+<h2>Quick Summary</h2>
+
+
+<table style="text-align: left; width: 725px; height: 121px;" border="1" cellpadding="2" cellspacing="2">
+
+
+  <tbody>
+
+
+    <tr>
+
+
+      <td>RQ_CMD_NOP</td>
+
+
+      <td>0</td>
+
+
+      <td>NOP</td>
+
+
+      <td>Doesn't do anything. &nbsp;Useful to stuff a
+protocol so that things align along the word boundaries.</td>
+
+
+    </tr>
+
+
+    <tr>
+
+
+      <td>RQ_CMD_CLEAR</td>
+
+
+      <td>1</td>
+
+
+      <td>NOP</td>
+
+
+      <td>Used to clear the data stored. &nbsp;Normally used
+to start an operation.</td>
+
+
+    </tr>
+
+
+    <tr>
+
+
+      <td>RQ_CMD_EXECUTE</td>
+
+
+      <td>2</td>
+
+
+      <td>NOP</td>
+
+
+      <td>Execute the commands received.</td>
+
+
+    </tr>
+
+
+    <tr>
+
+
+      <td>RQ_CMD_REQUEST</td>
+
+
+      <td>10</td>
+
+
+      <td>NOP</td>
+
+
+      <td>Indicates that the Client is making a reqest.</td>
+
+
+    </tr>
+
+
+    <tr>
+
+
+      <td>RQ_CMD_REPLY</td>
+
+
+      <td>11</td>
+
+
+      <td>NOP</td>
+
+
+      <td>Indicates that the Service is replying to a request.</td>
+
+
+    </tr>
+
+
+    <tr>
+
+
+      <td>RQ_CMD_RECEIVED</td>
+
+
+      <td>12</td>
+
+
+      <td>NOP</td>
+
+
+      <td>Indicates that message was received</td>
+
+
+    </tr>
+
+
+    <tr>
+
+
+      <td>RQ_CMD_DELIVERED</td>
+
+
+      <td>13</td>
+
+
+      <td>NOP</td>
+
+
+      <td>Indicates that the message was delivered.</td>
+
+
+    </tr>
+
+
+    <tr>
+
+
+      <td>RQ_CMD_BROADCAST</td>
+
+
+      <td>14</td>
+
+
+      <td>NOP</td>
+
+
+      <td>Indicates that the message should be sent to all nodes consuming the queue. &nbsp; Implies NOREPLY.</td>
+
+
+    </tr>
+
+
+    <tr>
+
+
+      <td>RQ_CMD_NOREPLY</td>
+
+
+      <td>15</td>
+
+
+      <td>NOP</td>
+
+
+      <td>Indicates that no reply is expected. &nbsp;Reduces resources used by the Controller, so should be used when applicable.</td>
+
+
+    </tr>
+
+
+    <tr>
+
+      <td>RQ_CMD_UNDELIVERED</td>
+
+      <td>16</td>
+
+      <td>NOP</td>
+
+      <td>Indicates that the controller was unable to deliver the message within the timeout period.</td>
+
+    </tr>
+
+    <tr>
+
+
+      <td>RQ_CMD_CONSUME</td>
+
+
+      <td>20</td>
+
+
+      <td>NOP</td>
+
+
+      <td>Indicates that the Node is wanting to consume a Queue.</td>
+
+
+    </tr>
+
+
+    <tr>
+
+
+      <td>RQ_CMD_CANCEL_QUEUE</td>
+
+
+      <td>21</td>
+
+
+      <td>NOP</td>
+
+
+      <td>Indicates that the Node no longer wants to consume the queue from this Controller.</td>
+
+
+    </tr>
+
+
+    <tr>
+      <td>RQ_CMD_CLOSING</td>
+      <td>22</td>
+      <td>NOP</td>
+      <td>Indicates that the Controller is closing, and the Node should attempt to connect to its alternate controller.</td>
+    </tr>
+    <tr>
+      <td>RQ_CMD_SERVER_FULL</td>
+      <td>23</td>
+      <td>NOP</td>
+      <td>When a node connects, but the server is full, will receive
+this message. &nbsp;Do not rely on this, as sometimes the server will
+be full and not answer any more connections. &nbsp;A timeout on connect
+should be considered the same thing.</td>
+    </tr>
+    <tr>
+      <td>RQ_CMD_CONTROLLER</td>
+      <td>24</td>
+      <td>NOP</td>
+      <td>When a node connects to a controller, it uses this command to
+indicate that it is a controller too. &nbsp;Controller sync would then
+take place.</td>
+    </tr>
+    <tr>
+      <td>RQ_CMD_PRIORITY</td>
+      <td>64</td>
+      <td>TinyInt</td>
+      <td>Specifies a priority. &nbsp;Normally when consuming a queue.
+&nbsp;At some point, message priority may be implemented, but not
+currently.</td>
+    </tr>
+    <tr>
+      <td>RQ_CMD_RETRIES</td>
+      <td>65</td>
+      <td>TinyInt</td>
+      <td>Number of times that the controller will try to deliver the
+message before giving up and returning it. &nbsp;Does not over-ride or
+reset timeout value.</td>
+    </tr>
+    <tr>
+      <td>RQ_CMD_QUEUEID</td>
+      <td>96</td>
+      <td>ShortInt</td>
+      <td>ID of the Queue. &nbsp;Should be used instead of RQ_CMD_QUEUE to speed up processing and reduce the amount of data sent.</td>
+    </tr>
+    <tr>
+      <td>RQ_CMD_TIMEOUT</td>
+      <td>97</td>
+      <td>ShortInt</td>
+      <td>Timeout (in seconds) for the message. &nbsp;If it is not
+delivered or processed within this time then it is returned. &nbsp;It
+will not be returned if NOREPLY is specified.</td>
+    </tr>
+    <tr>
+
+
+      <td>RQ_CMD_MAX</td>
+      <td>98</td>
+
+
+      <td>ShortInt</td>
+
+
+      <td>Used when consuming a queue, indicating the number of messages the service will consume at a time. <br>
+      </td>
+    </tr>
+    <tr>
+      <td>RQ_CMD_ID
+
+      </td>
+      <td>128</td>
+      <td>LargeInt</td>
+      <td>ID of the message.</td>
+    </tr>
+
+
+    
+
+    
+
+    <tr>
+
+
+      <td>RQ_CMD_QUEUE</td>
+
+
+      <td>160</td>
+
+
+      <td>ShortStr</td>
+
+
+      <td>Name of the queue that is being consumed. &nbsp;An ID would
+be issued which should be used when sending messages, but this string
+can be supplied instead.</td>
+
+
+    </tr>
+
+
+    <tr>
+
+
+      <td>RQ_CMD_PAYLOAD</td>
+
+
+      <td>224</td>
+
+
+      <td>LargeStr</td>
+
+
+      <td></td>
+
+
+    </tr>
+
+
+  
+  </tbody>
+</table>
+
+
+&nbsp;<br>
+<h2>Command Details</h2>
+<br>
+<br>
+
+
+</body>
+</html>

@@ -1,0 +1,55 @@
+
+RQ
+
+Functional Specification
+
+
+
+SYSTEM OVERVIEW
+
+
+CONTROLLER CONNECTIONS TO OTHER CONTROLLERS
+
+   We would like to have a backup controller in case one fails.  The clients would only connect to the master controller.  If the connection is lost, then it will immediately jump to the second controller.  This means that some clients may jump, but not all.  We would need to add servers to the cluster without bringing down the cluster.
+
+   Controllers can be configured to connect to other controllers.  This connection is used to pass messages on for nodes in cases where a server is not connected to the primary controller, and messages are coming in on the second controller.  The messages can still be routed to the primary.  This can also be the case where servers are connected to the local controller on the same machine, but some services are run on another machine.  Those other services connect to the controller on their machine.  This means that the local controller will try and pass the message on to a server that is also local, and only pass it on to the other controller if the local services are busy.
+
+
+BROADCAST MESSAGES
+
+	Messages can be sent to all services that are consuming that queue.  This can be useful to send some information to all at the same time, or to send messages that can be handled by one or more services independantly.
+	 
+	The RQ_CMD_NOREPLY flag can be set which will cause the target service to process the request, but not send a reply.  If you do not need a reply, this flag is recommended because the message uses less resources on the server and client, as they are freed up as soon as they are sent, because a reply was not needed.
+	
+	If you are sending a broadcast message to a queue that you subscribe to, you will also get the broadcast message unless you also set the RQ_CMD_SKIPSELF flag.
+
+
+CONTROLLER SHUTTING DOWN
+
+	When the controller is shutting down, it will send a message to all connected clients telling them that the server is shutting down.  It will then wait till all existing communications either completes, or time-out.
+
+
+EXCLUSIVE QUEUES
+
+	There are times when you need a service to have exclusive control over a resource, most likely a set of database tables.  It becomes very complicated when trying to have more than one service share a resource, which would involve synhronization and locking.  Therefore, it would be more beneficial to have a single small service that handles information for that resource.  However, if a service fails, we want a backup service to kick in quickly and take over processing.  To facilitate this, we have exclusive queues.  Technically, when the service starts, and attempts to consume a queue, it will indicate that it wants to consume that queue exclusively.  Which means that if another service is already consuming the queue, then this instance will wait until the existing service stops, and the controller sends a notification that the queue is available.
+
+	Technically this is done by the service sending a normal CONSUME request, with the EXCLUSIVE flag set.  If the controller is not already processing that queue, then it will respond as normal, allowing the service to consume it.  However, if a service already exists, and is consuming the queue, then the server will respond with a QUEUE_FULL message.  The new service can then send a message QUEUE_AVAILABLE_NOTIFY message which basically tells the controller to notify this service when there is no longer any services consuming the queue.
+
+
+DROPPING SERVICES
+
+	If a service is consuming a queue, and a message sent to that queue is expiring before it is being processed, we would need to drop that service from consuming the queue.  We want to be careful because there might be some instances where a service can get busy and even though it is responding, it just cant get to all messages before they expire.  But if a queue gets two expired messages in a row from a service, then it should drop that service.  Not sure how this would work in the real world though.  Might need to be a bit more flexible than this.
+
+RETRY LIMIT
+
+	When a message is sent, it has an optional setting for a retry limit.  It is seperate from the Timout.  It means that if a message is placed on a queue, and then sent to a consumer, if the consumer fails before sending a reply, it will send the message to another consumer as soon as it becomes available.
+	
+
+-- 
+
+
+
+
+
+
+
