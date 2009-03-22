@@ -1,3 +1,5 @@
 *.o
 *.so.*
 rqd
+log-test
+rq-log
