@@ -58,6 +58,7 @@ typedef struct {
   expbuf_t buffer;		// generic buffer that is mutli-use, but should be empty when finished.
   expbuf_t formatted;	// buffer for formatting text data.
   expbuf_t packet;		// formed 'log' packet that needs to be added as a message payload.
+  rq_message_t *msg;
 } rq_log_t;
 
 

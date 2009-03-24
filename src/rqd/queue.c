@@ -12,8 +12,6 @@
 
 
 
-
-
 void queue_list_init(queue_list_t *list)
 {
 	assert(list != NULL);
@@ -56,13 +54,16 @@ void queue_init(queue_t *queue)
 	assert(queue != NULL);
 	queue->name = NULL;
 	queue->qid = 0;
-// 	queue->flags = 0;
+ 	queue->flags = 0;
 
 	queue->nodelist = NULL;
 	queue->nodes = 0;
 
-	queue->msglist = NULL;
-	queue->messages = 0;
+	queue->msghead = NULL;
+	queue->msgtail = NULL;
+
+	queue->waitinglist = NULL;
+	queue->waiting = 0;
 }
 
 
@@ -89,26 +90,10 @@ void queue_free(queue_t *queue)
 	}
 	assert(queue->nodes == 0);
 	
-	// TODO: Remove code... not needed because action takes care of it.
-	assert(queue->msglist == NULL);
-	assert(queue->messages == 0);
-// 	if (queue->msglist != NULL) {
-// 		assert(queue->messages > 0);
-// 		while(queue->messages > 0) {
-// 			queue->messages --;
-// 			if (queue->msglist[queue->messages] != NULL) {
-// 				queue_msg_free(queue->msglist[queue->messages]);
-// 				free(queue->msglist[queue->messages]);
-// 				queue->msglist[queue->messages] = NULL;
-// 			}
-// 		}
-// 		free(queue->msglist);
-// 		queue->msglist = NULL;
-// 		queue->messages = 0;
-// 	}
-
-	
+	assert(queue->msghead == NULL);
+	assert(queue->msgtail == NULL);
 }
+
 
 //-----------------------------------------------------------------------------
 // When a node indicates that it wants to consume a queue, this function is
@@ -116,13 +101,15 @@ void queue_free(queue_t *queue)
 // this queue is being consumed, then we need to mark it so that the timer can
 // find it, and send the appropriate consume requests to the connected
 // controller nodes.
-int queue_consume(queue_list_t *queuelist, node_t *node)
+int queue_consume(queue_list_t *queuelist, node_t *node, short exclusive)
 {
-	int i, qid, next;
+	int i;
+	queue_id_t qid, next;
 	queue_t *q=NULL;
-	nodequeue_t *nq;
+	node_queue_t *nq;
 	queue_msg_t *qmsg;
 	action_t *action;
+	short exclusive;
 	
 	assert(queuelist);
 	assert(node);
@@ -200,6 +187,13 @@ int queue_consume(queue_list_t *queuelist, node_t *node)
 
 	assert(q != NULL);
 	assert(q->qid == qid);
+
+	exclusive = 0;
+	if (BIT_TEST(node->data.flags, DATA_FLAG_EXCLUSIVE))
+		exclusive = 1;
+
+
+
 	
 	// now we need to add this new node to the list for this queue, along with any other info we need to keep.
 	assert(node);
@@ -207,7 +201,7 @@ int queue_consume(queue_list_t *queuelist, node_t *node)
 	nq = NULL;
 	for(i=0; i<q->nodes; i++) {
 		if (q->nodelist[i] == NULL) {
-			q->nodelist[i] = (nodequeue_t *) malloc(sizeof(nodequeue_t));
+			q->nodelist[i] = (node_queue_t *) malloc(sizeof(node_queue_t));
 			assert(q->nodelist[i] != NULL);
 			nq = q->nodelist[i];
 			break;
@@ -218,10 +212,10 @@ int queue_consume(queue_list_t *queuelist, node_t *node)
 	}
 	if (i >= q->nodes) {
 		// we didn't break out of the list early, means we didn't find an empty slot in the list.
-		q->nodelist = (nodequeue_t **) realloc(q->nodelist, sizeof(nodequeue_t *)*(q->nodes + 1));
+		q->nodelist = (node_queue_t **) realloc(q->nodelist, sizeof(node_queue_t *)*(q->nodes + 1));
 		assert(q->nodelist != NULL);
 			
-		q->nodelist[q->nodes] = (nodequeue_t *) malloc(sizeof(nodequeue_t));
+		q->nodelist[q->nodes] = (node_queue_t *) malloc(sizeof(node_queue_t));
 		assert(q->nodelist[q->nodes] != NULL);
 		nq = q->nodelist[q->nodes];
 		q->nodes++;
@@ -239,16 +233,11 @@ int queue_consume(queue_list_t *queuelist, node_t *node)
 	nq->waiting = 0;
 
 	// need to check the queue to see if there are messages pending.  If there are, then send some to this node.
-	assert(q != NULL);
-	assert((q->messages==0 && q->msglist == NULL) || (q->messages>0 && q->msglist != NULL));
-	for (i=0; i<q->messages; i++) {
-		qmsg = q->msglist[i];
-		if (qmsg != NULL) {
+	if (q->msghead != NULL) {
 
-			// not done.
-			assert(0);
-			
-		}
+		// not done.
+		assert(0);
+
 	}
 
 
@@ -259,24 +248,21 @@ int queue_consume(queue_list_t *queuelist, node_t *node)
 }
 
 
-queue_t * queue_get(queue_list_t *ql, char *name, int qid)
+queue_t * queue_get(queue_list_t *ql, queue_id_t qid)
 {
 	queue_t *q = NULL;
 	queue_t *tmp;
 	int i;
 
 	assert(ql != NULL);
-	assert((name != NULL && qid == 0) || (name == NULL && qid > 0));
+	assert(qid > 0);
 
 	assert((ql->queues == 0 && ql->list == NULL) || (ql->queues > 0 && ql->list != NULL));
 	for (i=0; i<ql->queues; i++) {
 		tmp = ql->list[i];
 		if (tmp != NULL) {
 			assert(tmp->name != NULL);
-			if (qid > 0 && tmp->qid == qid) {
-				q = tmp;
-			}
-			else if (strcmp(name, tmp->name) == 0) {
+			if (tmp->qid == qid) {
 				q = tmp;
 			}
 		}
@@ -293,7 +279,8 @@ queue_t * queue_get(queue_list_t *ql, char *name, int qid)
 queue_t * queue_create(queue_list_t *ql, char *name)
 {
 	queue_t *q = NULL;
-	int qid, slot, i;
+	queue_id_t qid;
+	int slot, i;
 
 	assert(ql != NULL);
 	assert(name != NULL);
@@ -377,7 +364,6 @@ void queue_msg_free(queue_msg_t *msg)
 {
 	assert(msg);
 	assert(0);
-	
 }
 
 

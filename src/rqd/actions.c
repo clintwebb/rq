@@ -226,12 +226,10 @@ void ah_queue_shutdown(action_t *action)
 	queue = action->data;
 
 	// if there is pending messages to deliver, then reply to the source, indicating unable to deliver.
-	for (i=0; i < queue->messages; i++) {
-		if (queue->msglist[i] != NULL) {
-			// We have a message that needs to be returned.
+	if (queue->msghead != NULL) {
+		// We have a message that needs to be returned.
 
-			assert(0);
-		}
+		assert(0);
 	}
 	
 	// delete the list of nodes that are consuming this queue.
@@ -306,15 +304,19 @@ void ah_stats(action_t *action)
 	assert(stats != NULL);
 	if (stats->in_bytes || stats->out_bytes || stats->requests || stats->replies || stats->broadcasts) {
 
+		assert(sysdata->actpool);
+
 		if (sysdata->verbose)
-			printf("Bytes [%u/%u], Clients [%u], Requests [%u], Replies [%u], Broadcasts [%u], Queues[%u]\n",
+			printf("Bytes [%u/%u], Clients [%u], Requests [%u], Replies [%u], Broadcasts [%u], Queues[%u], ActPool[%u/%u]\n",
 				stats->in_bytes,
 				stats->out_bytes,
 				clients,
 				stats->requests,
 				stats->replies,
 				stats->broadcasts,
-				queues);
+				queues,
+				action_pool_active(sysdata->actpool),
+				action_pool_inactive(sysdata->actpool));
 		
 		stats->in_bytes = 0;
 		stats->out_bytes = 0;

@@ -63,14 +63,17 @@
 #define RQ_CMD_RECEIVED         12
 #define RQ_CMD_DELIVERED        13
 #define RQ_CMD_BROADCAST        14
-#define RQ_CMD_NOREPLY          15
-#define RQ_CMD_UNDELIVERED      16
+#define RQ_CMD_UNDELIVERED      15
 
 #define RQ_CMD_CONSUME          20
 #define RQ_CMD_CANCEL_QUEUE     21
 #define RQ_CMD_CLOSING          22
 #define RQ_CMD_SERVER_FULL      23
 #define RQ_CMD_CONTROLLER       24
+
+#define RQ_CMD_NOREPLY          30
+#define RQ_CMD_EXCLUSIVE        31
+
 // byte integer (64 to 95)
 #define RQ_CMD_PRIORITY         64
 #define RQ_CMD_RETRIES					65

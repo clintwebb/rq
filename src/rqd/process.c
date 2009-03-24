@@ -9,8 +9,81 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+//-----------------------------------------------------------------------------
+// A request has been received for a queue.  We need take it and pass it to a
+// node that can handle the request.
 void processRequest(node_t *node)
 {
+	message_t *msg;
+	char *qname;
+	queue_id_t qid;
+	queue_t *q;
+	
+	
+	assert(node);
+	assert(node->sysdata);
+	assert(node->sysdata->msgpool);
+
+	// make sure we have the required data.
+	if ((BIT_TEST(node->data.mask, DATA_MASK_QUEUE) || BIT_TEST(node->data.mask, DATA_MASK_QUEUEID))
+				&& BIT_TEST(node->data.mask, DATA_MASK_PAYLOAD)) {
+
+		// create the message object to hold the data.
+		msg = mempool_get(node->sysdata->msgpool, sizeof(message_t));
+		if (msg == NULL) {
+			msg = (message_t *) malloc(sizeof(message_t));
+			mempool_assign(node->sysdata->msgpool, msg, sizeof(message_t));
+		}
+		message_init(msg, node->sysdata);
+		
+		// make a note in the msg object, the source node.
+		message_set_orignode(msg, node);
+	
+		// if a messageid has been supplied, use that for the node_side.
+		assert(0);
+		
+		// find the queue object.
+		// do we have a queue name, or a qid?
+
+		// assert: test code... was pasted in, but hasn't been checked.
+		assert(0);
+
+		
+		qname = NULL;
+		qid = 0;
+		if (BIT_TEST(node->data.mask, DATA_MASK_QUEUE)) {
+			qname = expbuf_string(&node->data.queue);
+			qid = queue_id(node->sysdata->queuelist, qname);
+		}
+		else if (BIT_TEST(node->data.mask, DATA_MASK_QUEUEID)) {
+			qid = node->data.qid;
+		}
+		assert(qid > 0);
+	
+		// get the pointer to the queue structure based on the qid or the qname.
+		assert(node->sysdata->queuelist != NULL);
+		q = queue_get(node->sysdata->queuelist, qid);
+		if (q == NULL) {
+			// we dont have a queue.
+			assert(qid == 0);
+	
+			// if we have a 'KEEP' setting, then we need to create the queue, and
+			// add the message to it, so that it can be delivered when a consumer
+			// signs on.
+			q = queue_create(node->sysdata->queuelist, qname);
+		}
+		
+		// add the message to the queue.
+		assert(0);
+	
+		// create an action to process the messages on the queue (if action not already pending).
+		assert(0);
+	}
+	else {
+		// required data was not found.
+		// need to return some sort of error
+		assert(0);
+	}
 	assert(0);
 }
 
@@ -23,7 +96,7 @@ void processReply(node_t *node)
 // a node has requested to consume a particular queue.
 void processConsume(node_t *node)
 {
-	int qid;
+	queue_id_t qid;
 	
 	assert(node != NULL);
 	assert(node->sysdata != NULL);
@@ -39,11 +112,17 @@ void processConsume(node_t *node)
 		assert(node->sysdata->queuelist != NULL);
 		qid = queue_consume((queue_list_t *)node->sysdata->queuelist, node);
 		
-		// we have the queue-id, so we need to reply with it.
-		sendConsumeReply(node, expbuf_string(&node->data.queue), qid);
+		if (qid > 0) {
+			// we have the queue-id, so we need to reply with it.
+			sendConsumeReply(node, expbuf_string(&node->data.queue), qid);
 	
-		if (node->sysdata->verbose > 1)
-			printf("processConsume - Done\n");
+			if (node->sysdata->verbose > 1)
+				printf("processConsume - Done\n");
+		}
+		else {
+			if (node->sysdata->verbose > 1)
+				printf("processConsume - Defered, queue already consumed exclusively.\n");
+		}
 	}
 }
 
@@ -82,8 +161,8 @@ void processController(node_t *node)
 // require a reply...
 void processBroadcast(node_t *node)
 {
-	queue_t *q;
 	message_t *msg;
+	queue_t *q;
 	char *qname;
 	int qid;
 	int sent;
@@ -110,7 +189,7 @@ void processBroadcast(node_t *node)
 
 		// get the pointer to the queue structure based on the qid or the qname.
 		assert(node->sysdata->queuelist != NULL);
-		q = queue_get(node->sysdata->queuelist, qname, qid);
+		q = queue_get(node->sysdata->queuelist, qid);
 		if (q == NULL) {
 			// we dont have a queue.
 			assert(qid == 0);
@@ -130,9 +209,22 @@ void processBroadcast(node_t *node)
 			if (q->nodelist[i] != NULL) {
 
 				// create message object.
-				assert(0);
+				assert(node->sysdata);
+				assert(node->sysdata->msgpool);
+				msg = mempool_get(node->sysdata->msgpool, sizeof(message_t));
+				if (msg == NULL) {
+					msg = (message_t *) malloc(sizeof(message_t));
+					message_init(msg, node->sysdata);
+					mempool_assign(node->sysdata->msgpool, msg, sizeof(message_t));
+				}
+				assert(msg);
+
 
 				// add message to the node.
+				assert(0);
+
+				// do we want to assign the message to the node?  Do we really need to do that?  Or should we just put the message in the nodes outgoing buffer?  There is no real reason to track it any further because there is no reply expected.
+				
 				assert(0);
 
 				sent++;

@@ -30,10 +30,10 @@ install: librq-log.so.1.0.1 rq-log.h
 
 
 
-rq-log: rq-log.c 
+rq-log: rq-log.c /usr/include/rq-log.h /usr/lib/librq-log.so.1.0.1
 	gcc -o $@ rq-log.c -lrispbuf -lrisp -levent -lexpbuf -lrq $(ARGS)
 
-log-test: log-test.c 
+log-test: log-test.c /usr/include/rq-log.h rq-log
 	gcc -o $@ log-test.c -lrq-log -lrispbuf -lrisp -lexpbuf -lrq -levent $(ARGS)
 
 

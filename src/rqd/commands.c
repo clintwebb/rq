@@ -132,7 +132,7 @@ void cmdRequest(void *base)
 	// ensure only the legal data is used.
 	node->data.mask &= (DATA_MASK_ID | DATA_MASK_TIMEOUT | DATA_MASK_QUEUEID | DATA_MASK_QUEUE | DATA_MASK_PAYLOAD);
 
-	if (node->sysdata->verbose)
+	if (node->sysdata->verbose > 1)
 		printf("node:%d REQUEST (flags:%x, mask:%x)\n", node->handle, node->data.flags, node->data.mask);
 }
 
@@ -150,7 +150,7 @@ void cmdReply(void *base)
 	// ensure only the legal data is used.
 	node->data.mask &= (DATA_MASK_ID | DATA_MASK_PAYLOAD);
 
-	if (node->sysdata->verbose)
+	if (node->sysdata->verbose > 1)
 		printf("node:%d REPLY (flags:%x, mask:%x)\n", node->handle, node->data.flags, node->data.mask);
 }
 
@@ -165,12 +165,13 @@ void cmdBroadcast(void *base)
  	node->data.flags &= (DATA_FLAG_REQUEST | DATA_FLAG_NOREPLY);
  	// set our specific flag.
 	node->data.flags |= DATA_FLAG_BROADCAST;
+	node->data.flags |= DATA_FLAG_NOREPLY;		// broadcast implies noreply.
 	// ensure only the legal data is used.
 	node->data.mask &= (DATA_MASK_ID | DATA_MASK_TIMEOUT | DATA_MASK_QUEUEID | DATA_MASK_QUEUE | DATA_MASK_PAYLOAD);
 
 	assert(node->sysdata != NULL);
 	assert(node->sysdata->verbose >= 0);
-	if (node->sysdata->verbose)
+	if (node->sysdata->verbose > 1)
 		printf("node:%d BROADCAST (flags:%x, mask:%x)\n", node->handle, node->data.flags, node->data.mask);
 }
 
@@ -190,8 +191,29 @@ void cmdNoReply(void *base)
 
 	assert(node->sysdata != NULL);
 	assert(node->sysdata->verbose >= 0);
-	if (node->sysdata->verbose)
+	if (node->sysdata->verbose > 1)
 		printf("node:%d NOREPLY (flags:%x, mask:%x)\n", node->handle, node->data.flags, node->data.mask);
+}
+
+
+void cmdExclusive(void *base)
+{
+	node_t *node = (node_t *) base;
+ 	assert(node != NULL);
+	assert(node->sysdata != NULL);
+	assert(node->sysdata->verbose >= 0);
+
+ 	// ensure only the flags that are valid.
+ 	node->data.flags &= (DATA_FLAG_CONSUME);
+ 	// set our specific flag.
+	node->data.flags |= DATA_FLAG_EXCLUSIVE;
+	// ensure only the legal data is used.
+	node->data.mask &= ( DATA_MASK_QUEUE );
+
+	assert(node->sysdata != NULL);
+	assert(node->sysdata->verbose >= 0);
+	if (node->sysdata->verbose > 1)
+		printf("node:%d EXCLUSIVE (flags:%x, mask:%x)\n", node->handle, node->data.flags, node->data.mask);
 }
 
 
@@ -208,7 +230,7 @@ void cmdConsume(void *base)
 
 	assert(node->sysdata != NULL);
 	assert(node->sysdata->verbose >= 0);
-	if (node->sysdata->verbose)
+	if (node->sysdata->verbose > 1)
 		printf("node:%d CONSUME (flags:%x, mask:%x)\n", node->handle, node->data.flags, node->data.mask);
 }
 
@@ -225,7 +247,7 @@ void cmdCancelQueue(void *base)
 
 	assert(node->sysdata != NULL);
 	assert(node->sysdata->verbose >= 0);
-	if (node->sysdata->verbose)
+	if (node->sysdata->verbose > 1)
 		printf("node:%d CANCEL QUEUE (flags:%x, mask:%x)\n", node->handle, node->data.flags, node->data.mask);
 }
 
@@ -239,7 +261,7 @@ void cmdId(void *base, risp_int_t value)
 	
 	assert(node->sysdata != NULL);
 	assert(node->sysdata->verbose >= 0);
-	if (node->sysdata->verbose)
+	if (node->sysdata->verbose > 1)
 		printf("node:%d ID (%d)\n", node->handle, value);
 }
 
@@ -252,7 +274,7 @@ void cmdTimeout(void *base, risp_int_t value)
 	node->data.mask |= (DATA_MASK_TIMEOUT);
 	assert(node->sysdata != NULL);
 	assert(node->sysdata->verbose >= 0);
-	if (node->sysdata->verbose)
+	if (node->sysdata->verbose > 1)
 		printf("node:%d TIMEOUT (%d)\n", node->handle, value);
 }
 
@@ -266,7 +288,7 @@ void cmdMax(void *base, risp_int_t value)
 
 	assert(node->sysdata != NULL);
 	assert(node->sysdata->verbose >= 0);
-	if (node->sysdata->verbose)
+	if (node->sysdata->verbose > 1)
 		printf("node:%d MAX (%d)\n", node->handle, value);
 }
 
@@ -280,7 +302,7 @@ void cmdPriority(void *base, risp_int_t value)
 
 	assert(node->sysdata != NULL);
 	assert(node->sysdata->verbose >= 0);
-	if (node->sysdata->verbose)
+	if (node->sysdata->verbose > 1)
 		printf("node:%d PRIORITY (%d)\n", node->handle, value);
 }
 
@@ -296,7 +318,7 @@ void cmdQueue(void *base, risp_length_t length, risp_char_t *data)
 	
 	assert(node->sysdata != NULL);
 	assert(node->sysdata->verbose >= 0);
-	if (node->sysdata->verbose)
+	if (node->sysdata->verbose > 1)
 		printf("node:%d QUEUE (%s)\n", node->handle, expbuf_string(&node->data.queue));
 }
 
@@ -311,7 +333,7 @@ void cmdPayload(void *base, risp_length_t length, risp_char_t *data)
 	
 	assert(node->sysdata != NULL);
 	assert(node->sysdata->verbose >= 0);
-	if (node->sysdata->verbose)
+	if (node->sysdata->verbose > 1)
 		printf("node:%d PAYLOAD (len:%d)\n", node->handle, length);
 }
 
@@ -331,7 +353,7 @@ void cmdReceived(void *base)
 
 	assert(node->sysdata != NULL);
 	assert(node->sysdata->verbose >= 0);
-	if (node->sysdata->verbose)
+	if (node->sysdata->verbose > 1)
 		printf("node:%d RECEIVED (flags:%x, mask:%x)\n", node->handle, node->data.flags, node->data.mask);
 }
 
@@ -349,7 +371,7 @@ void cmdDelivered(void *base)
 
 	assert(node->sysdata != NULL);
 	assert(node->sysdata->verbose >= 0);
-	if (node->sysdata->verbose)
+	if (node->sysdata->verbose > 1)
 		printf("node:%d DELIVERED (flags:%x, mask:%x)\n", node->handle, node->data.flags, node->data.mask);
 }
 

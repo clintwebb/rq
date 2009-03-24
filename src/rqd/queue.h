@@ -6,13 +6,9 @@
 #include "message.h"
 
 
-// #define FLAG_QUEUE_NOTIFY	0x01
-// #define FLAG_QUEUE_DELETE	0x02
-// #define FLAG_QUEUE_CLOSING 0x03
-
-
 #define QUEUE_LOW_PRIORITY	10
 
+#define QUEUE_FLAG_EXCLUSIVE 0x0001
 
 // structure to keep track of the node that is consuming the queue
 typedef struct {
@@ -20,57 +16,61 @@ typedef struct {
 	short int max;				// maximum number of messages this node will process at a time.
 	short int priority;
 	short int waiting;
-} nodequeue_t;
+} node_queue_t;
 
 
-typedef struct {
+typedef struct __queue_msg_t {
 	message_t msg;
+	struct __queue_msg_t *next, *prev;
 } queue_msg_t;
 
 
+typedef int queue_id_t;
+
 typedef struct {
 	char *name;
-	int qid;
-// 	unsigned short int flags;
-
+	queue_id_t qid;
+	unsigned int flags;
+	
 	// need a list of messages that need to be delivered
-	queue_msg_t **msglist;
-	int messages;
+	queue_msg_t *msghead, *msgtail;
 
 	// need a list of nodes that have subscribed to this queue.
-	nodequeue_t **nodelist;
+	node_queue_t **nodelist;
 	int nodes;
-	
+
+	// when a queue is being consumed exclusively, this list contains the nodes
+	// that are waiting.  When an exclusive consumer has disconnected, the next
+	// entry in this list will 
+	node_queue_t *waitinglist;
+	int waiting;
 } queue_t;
 
 
 typedef struct {
-	queue_t **list;
-	int       queues;
-	int       next_qid;
+	queue_t  **list;
+	int        queues;
+	queue_id_t next_qid;
 } queue_list_t;
 
 
 void queue_list_init(queue_list_t *list);
 void queue_list_free(queue_list_t *list);
 
+int queue_consume(queue_list_t *queuelist, node_t *node);
+queue_t * queue_get(queue_list_t *ql, queue_id_t qid);
+queue_t * queue_create(queue_list_t *ql, char *name);
+void queue_cancel_node(queue_list_t *queuelist, node_t *node);
 
 void queue_init(queue_t *queue);
 void queue_free(queue_t *queue);
-
-int queue_consume(queue_list_t *queuelist, node_t *node);
-queue_t * queue_get(queue_list_t *ql, char *name, int qid);
-queue_t * queue_create(queue_list_t *ql, char *name);
 void queue_addmsg(queue_t *queue, message_t *msg);
-void queue_cancel_node(queue_list_t *queuelist, node_t *node);
 
 void queue_msg_init(queue_msg_t *msg);
 void queue_msg_free(queue_msg_t *msg);
 
 int queue_id(queue_list_t *ql, char *name);
-
 void queue_notify(queue_t *queue, void *server);
-// int queue_cleanup_check(queue_t *queue);
 
 #endif
 

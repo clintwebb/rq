@@ -312,6 +312,7 @@ int main(int argc, char **argv)
 	risp_add_command(risp, RQ_CMD_NOREPLY,      &cmdNoReply);
 	risp_add_command(risp, RQ_CMD_CONSUME,      &cmdConsume);
 	risp_add_command(risp, RQ_CMD_CANCEL_QUEUE, &cmdCancelQueue);
+	risp_add_command(risp, RQ_CMD_EXCLUSIVE,    &cmdExclusive);
 	risp_add_command(risp, RQ_CMD_ID,           &cmdId);
 	risp_add_command(risp, RQ_CMD_TIMEOUT,      &cmdTimeout);
 	risp_add_command(risp, RQ_CMD_MAX,          &cmdMax);

@@ -55,7 +55,7 @@ queue.o: queue.c $(H_queue) $(H_server) $(H_actions)
 rqd.o: rqd.c daemon.h $(H_actions) $(H_commands) $(H_server) $(H_settings) $(H_system_data)
 	gcc -c -o $@ rqd.c $(ARGS)
 
-send.o: send.c $(H_send)
+send.o: send.c $(H_send) $(H_queue)
 	gcc -c -o $@ send.c $(ARGS)
 
 server.o: server.c $(H_server) $(H_commands) $(H_queue) $(H_settings)

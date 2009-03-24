@@ -31,8 +31,10 @@ void message_free(message_t *msg)
 	assert(msg != NULL);
 	assert(msg->sysdata != NULL);
 
-	if (msg->data != NULL)
+	if (msg->data != NULL) {
 		expbuf_pool_return(msg->sysdata->bufpool, msg->data);
+		msg->data = NULL;
+	}
 	
 	msg->source_node = NULL;
 	msg->target_node = NULL;

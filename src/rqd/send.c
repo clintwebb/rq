@@ -1,6 +1,7 @@
 // send.c
 
 #include "send.h"
+#include "queue.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -36,6 +37,54 @@ void sendConsumeReply(node_t *node, char *queue, int qid)
 	node_write_now(node, node->build->length, node->build->data);
 	expbuf_clear(node->build);
 }
+
+//-----------------------------------------------------------------------------
+// Send a message to the node.  
+void sendMessage(node_t *node, message_t *msg)
+{
+	queue_t *q;
+	
+	assert(node != NULL);
+	assert(msg != NULL);
+
+	assert(node->sysdata == msg->sysdata);
+
+	// if we dont yet have a 'build' buffer then we will get one.
+	if (node->build == NULL) {
+		assert(node->sysdata != NULL);
+		assert(node->sysdata->bufpool != NULL);
+		node->build = expbuf_pool_new(node->sysdata->bufpool, 64);
+	}
+	assert(node->build != NULL);
+
+	assert(msg->data);
+	assert(msg->source_node);
+	assert(msg->target_node);
+	assert(msg->queue);
+
+	q = msg->queue;
+	assert(q->qid > 0);
+
+	if (BIT_TEST(msg->flags, FLAG_MSG_BROADCAST)) {
+		// We are sending a broadcast message
+		assert(BIT_TEST(msg->flags, FLAG_MSG_NOREPLY));
+		assert(msg->id == 0);
+	}
+
+	// add the commands to the out queue.
+	assert(node->build->length == 0);
+	addCmd(node->build, RQ_CMD_CLEAR);
+	addCmdInt(node->build, RQ_CMD_QUEUEID, q->qid);
+	addCmdLargeStr(node->build, RQ_CMD_PAYLOAD, msg->data->length, msg->data->data);
+	addCmd(node->build, RQ_CMD_EXECUTE);
+
+	assert(node->build->length > 0);
+	assert(node->build->length <= node->build->max);
+	assert(node->build->data != NULL);
+	node_write_now(node, node->build->length, node->build->data);
+	expbuf_clear(node->build);
+}
+
 
 
 void sendUndelivered(node_t *node, message_t *msg)

@@ -16,10 +16,10 @@
 #define DATA_MASK_PAYLOAD   0x40
 
 // operational flags.
-#define DATA_FLAG_REQUEST       0x0001	// 0001
-#define DATA_FLAG_REPLY         0x0002	// 0010
-#define DATA_FLAG_BROADCAST     0x0004	// 0100
-#define DATA_FLAG_NOREPLY       0x0008	// 1000
+#define DATA_FLAG_REQUEST       0x0001
+#define DATA_FLAG_REPLY         0x0002
+#define DATA_FLAG_BROADCAST     0x0004
+#define DATA_FLAG_NOREPLY       0x0008
 #define DATA_FLAG_CONSUME       0x0010
 #define DATA_FLAG_CANCEL_QUEUE  0x0020
 #define DATA_FLAG_CLOSING       0x0040
@@ -27,6 +27,7 @@
 #define DATA_FLAG_CONTROLLER    0x0100
 #define DATA_FLAG_RECEIVED      0x0200
 #define DATA_FLAG_DELIVERED     0x0400
+#define DATA_FLAG_EXCLUSIVE     0x0800
 
 
 

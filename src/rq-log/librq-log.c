@@ -151,7 +151,7 @@ static void add_pending_packet(rq_log_t *log)
 	assert(log->queue != NULL);
 
 	addCmd(&log->pending, RQ_CMD_CLEAR);
-	addCmd(&log->pending, RQ_CMD_BROADCAST);
+ 	addCmd(&log->pending, RQ_CMD_REQUEST);
 	addCmd(&log->pending, RQ_CMD_NOREPLY);
 	addCmdShortStr(&log->pending, RQ_CMD_QUEUE, strlen(log->queue), log->queue);
 	addCmdLargeStr(&log->pending, RQ_CMD_PAYLOAD, log->packet.length, log->packet.data);
@@ -206,7 +206,7 @@ static void rq_log_send(rq_log_t *log, unsigned short level, char *data, int len
 		assert(msg != NULL);
 		rq_message_init(msg);
 		rq_message_setqueue(msg, log->queue);
-		rq_message_setbroadcast(msg);
+// 		rq_message_setbroadcast(msg);
 		rq_message_setnoreply(msg);
 		rq_message_setdata(msg, log->packet.length, log->packet.data);
 
