@@ -233,13 +233,15 @@ void ah_queue_shutdown(action_t *action)
 	}
 	
 	// delete the list of nodes that are consuming this queue.
+	assert(0);   // code needs to be changed.
+/*	
 	if (queue->nodelist != NULL) {
 		free(queue->nodelist);
 		queue->nodelist = NULL;
 		queue->nodes = 0;
 	}
 	assert(queue->nodelist == NULL && queue->nodes == 0);
-
+*/
 	// Delete the queue from the queue list.
 	ql = sysdata->queuelist;
 	assert(ql);

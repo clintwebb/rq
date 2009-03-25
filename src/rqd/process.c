@@ -203,6 +203,9 @@ void processBroadcast(node_t *node)
 		// go thru the list of nodes for the queue.
 // 	nodequeue_t **nodelist;
 // 	int nodes;
+		
+/* doesnt work... fix
+
 		assert((q->nodes == 0 && q->nodelist == NULL) || (q->nodes > 0 && q->nodelist != NULL));
 		sent = 0;
 		for (i=0; i<q->nodes; i++) {
@@ -232,6 +235,7 @@ void processBroadcast(node_t *node)
 		}
 		assert(0);
 
+*/
 	
 		// now that we have a message structure completely filled out with the
 		// data from the node, then we need to add it to an action and fire it.
