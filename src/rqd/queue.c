@@ -56,14 +56,15 @@ void queue_init(queue_t *queue)
 	queue->qid = 0;
  	queue->flags = 0;
 
-	queue->nodelist = NULL;
-	queue->nodes = 0;
-
 	queue->msghead = NULL;
 	queue->msgtail = NULL;
+	queue->msgproc = NULL;
 
+	queue->nodes.busy = NULL;
+	queue->nodes.ready_head = NULL;
+	queue->nodes.ready_tail = NULL;
+	
 	queue->waitinglist = NULL;
-	queue->waiting = 0;
 }
 
 
@@ -79,19 +80,15 @@ void queue_free(queue_t *queue)
 		queue->name = NULL;
 	}
 
-	if (queue->nodelist != NULL) {
-		assert(queue->nodes > 0);
-		for (i=0; i<queue->nodes; i++) {
-			assert(queue->nodelist[i] == NULL);
-		}
-		free(queue->nodelist);
-		queue->nodelist = NULL;
-		queue->nodes = 0;
-	}
-	assert(queue->nodes == 0);
-	
 	assert(queue->msghead == NULL);
 	assert(queue->msgtail == NULL);
+	assert(queue->msgproc == NULL);
+
+	assert(queue->nodes.busy == NULL);
+	assert(queue->nodes.ready_head == NULL);
+	assert(queue->nodes.ready_tail == NULL);
+
+	assert(queue->waitinglist == NULL);
 }
 
 
@@ -101,7 +98,7 @@ void queue_free(queue_t *queue)
 // this queue is being consumed, then we need to mark it so that the timer can
 // find it, and send the appropriate consume requests to the connected
 // controller nodes.
-int queue_consume(queue_list_t *queuelist, node_t *node, short exclusive)
+int queue_consume(queue_list_t *queuelist, node_t *node)
 {
 	int i;
 	queue_id_t qid, next;
@@ -192,7 +189,7 @@ int queue_consume(queue_list_t *queuelist, node_t *node, short exclusive)
 	if (BIT_TEST(node->data.flags, DATA_FLAG_EXCLUSIVE))
 		exclusive = 1;
 
-
+	assert(0);
 
 	
 	// now we need to add this new node to the list for this queue, along with any other info we need to keep.

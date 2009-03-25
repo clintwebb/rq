@@ -11,11 +11,12 @@
 #define QUEUE_FLAG_EXCLUSIVE 0x0001
 
 // structure to keep track of the node that is consuming the queue
-typedef struct {
+typedef struct __node_queue_t {
 	node_t *node;
 	short int max;				// maximum number of messages this node will process at a time.
 	short int priority;
 	short int waiting;
+	struct __node_queue_t *next, *prev;
 } node_queue_t;
 
 
@@ -32,18 +33,27 @@ typedef struct {
 	queue_id_t qid;
 	unsigned int flags;
 	
-	// need a list of messages that need to be delivered
+	// a list of messages that need to be delivered.  New messages will be added
+	// to the tail.   Messages to be delivered will be at the head.   When
+	// messages are sent to a client, they are removed from the msghead, and put
+	// in msgproc;
 	queue_msg_t *msghead, *msgtail;
+	queue_msg_t *msgproc;
 
-	// need a list of nodes that have subscribed to this queue.
-	node_queue_t **nodelist;
-	int nodes;
+	// a list of nodes that have subscribed to this queue.  The busy list will
+	// include all the nodes that have reached their MAX message allocations.
+	// Nodes that can receive messages will be in ready.  When a message has
+	// been replied, if the head node is processing messages, and if the
+	// current node has more capacity, then it will be moved to the head.  
+	struct {
+		node_queue_t *busy;
+		node_queue_t *ready_head, *ready_tail;
+	} nodes;
 
 	// when a queue is being consumed exclusively, this list contains the nodes
 	// that are waiting.  When an exclusive consumer has disconnected, the next
 	// entry in this list will 
 	node_queue_t *waitinglist;
-	int waiting;
 } queue_t;
 
 
