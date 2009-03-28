@@ -671,7 +671,7 @@ static void rq_senddata(rq_t *rq, char *data, int length)
 //-----------------------------------------------------------------------------
 // Send a request to the controller indicating a desire to consume a particular
 // queue.  We will add queue information to our RQ structure.
-void rq_consume(rq_t *rq, char *queue, int max, int priority, void (*handler)(rq_message_t *msg, void *arg), void *arg)
+void rq_consume(rq_t *rq, char *queue, int max, int priority, int exclusive, void (*handler)(rq_message_t *msg, void *arg), void *arg)
 {
 	int i;
 	int found;
@@ -680,7 +680,7 @@ void rq_consume(rq_t *rq, char *queue, int max, int priority, void (*handler)(rq
 	assert(rq != NULL);
 	assert(queue != NULL);
 	assert(max >= 0);
-	assert(priority == RQ_PRIORITY_NONE || priority == RQ_PRIORITY_LOW || priority == RQ_PRIORITY_NORMAL || RQ_PRIORITY_HIGH);
+	assert(priority == RQ_PRIORITY_NONE || priority == RQ_PRIORITY_LOW || priority == RQ_PRIORITY_NORMAL || priority == RQ_PRIORITY_HIGH);
 	assert(handler != NULL);
 
 	// check that we are connected to a controller.
@@ -737,6 +737,7 @@ void rq_consume(rq_t *rq, char *queue, int max, int priority, void (*handler)(rq
 	// send consume request to controller.
 	addCmd(&rq->build, RQ_CMD_CLEAR);
 	addCmd(&rq->build, RQ_CMD_CONSUME);
+	if (exclusive != 0) addCmd(&rq->build, RQ_CMD_EXCLUSIVE);
 	addCmdShortStr(&rq->build, RQ_CMD_QUEUE, strlen(queue), queue);
 	addCmdInt(&rq->build, RQ_CMD_MAX, (short int)max);
 	addCmdShortInt(&rq->build, RQ_CMD_PRIORITY, (unsigned char)priority);

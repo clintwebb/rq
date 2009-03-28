@@ -157,7 +157,7 @@ void rq_setevbase(rq_t *rq, struct event_base *base);
 void rq_addcontroller(rq_t *rq, char *host, int port);
 int  rq_connect(rq_t *rq);
 void rq_settimeout(rq_t *rq, unsigned int msecs, void (*handler)(void *arg), void *arg);
-void rq_consume(rq_t *rq, char *queue, int max, int priority, void (*handler)(rq_message_t *msg, void *arg), void *arg);
+void rq_consume(rq_t *rq, char *queue, int max, int priority, int exclusive, void (*handler)(rq_message_t *msg, void *arg), void *arg);
 void rq_process(rq_t *rq);
 
 void rq_message_init(rq_message_t *msg);
