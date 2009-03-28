@@ -27,7 +27,6 @@ void node_init(node_t *node, system_data_t *sysdata)
 	assert(sysdata->stats != NULL);
 	assert(sysdata->risp != NULL);
 	assert(sysdata->evbase != NULL);
-	assert(sysdata->queuelist != NULL);
 
 	node->sysdata = sysdata;
 	node->handle = INVALID_HANDLE;
@@ -106,7 +105,8 @@ void node_clear(node_t *node)
 	}
 
 	// make sure that this node has been removed from all consumer queues.
-	queue_cancel_node(node->sysdata->queuelist, node);
+	if (node->sysdata->queues)
+		queue_cancel_node(node->sysdata->queues, node);
 	
 	data_clear(&node->data);
 }
@@ -143,7 +143,8 @@ static void node_closed(node_t *node)
 	assert(node->sysdata != NULL);
 
 	// we need to remove the consume on the queues.
-	queue_cancel_node(node->sysdata->queuelist, node);
+	if (node->sysdata->queues)
+		queue_cancel_node(node->sysdata->queues, node);
 
 	// we need to remove (return) any messages that this node was processing.
 // 	message_t **msglist;

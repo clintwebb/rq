@@ -1,9 +1,13 @@
 #ifndef __QUEUE_H
 #define __QUEUE_H
 
+
 //---------------------------------------------------------------------
 #include "node.h"
 #include "message.h"
+#include "system_data.h"
+
+
 
 
 #define QUEUE_LOW_PRIORITY	10
@@ -28,7 +32,7 @@ typedef struct __queue_msg_t {
 
 typedef int queue_id_t;
 
-typedef struct {
+typedef struct __queue_t {
 	char *name;
 	queue_id_t qid;
 	unsigned int flags;
@@ -43,35 +47,26 @@ typedef struct {
 	// a list of nodes that have subscribed to this queue.  The busy list will
 	// include all the nodes that have reached their MAX message allocations.
 	// Nodes that can receive messages will be in ready.  When a message has
-	// been replied, if the head node is processing messages, and if the
-	// current node has more capacity, then it will be moved to the head.  
-	struct {
-		node_queue_t *busy;
-		node_queue_t *ready_head, *ready_tail;
-	} nodes;
+	// been replied, if the head node is processing messages, and if the current
+	// node has more capacity, then it will be moved to the head.
+	node_queue_t *busy;
+	node_queue_t *ready_head, *ready_tail;
 
 	// when a queue is being consumed exclusively, this list contains the nodes
 	// that are waiting.  When an exclusive consumer has disconnected, the next
 	// entry in this list will 
 	node_queue_t *waitinglist;
+
+	// The pointers for the linked list of queues.
+	struct __queue_t *next, *prev;
 } queue_t;
 
 
-typedef struct {
-	queue_t  **list;
-	int        queues;
-	queue_id_t next_qid;
-} queue_list_t;
+queue_t * queue_get_id(queue_t *head, queue_id_t qid);
+queue_t * queue_get_name(queue_t *head, const char *qname);
+void queue_cancel_node(queue_t *head, node_t *node);
 
-
-void queue_list_init(queue_list_t *list);
-void queue_list_free(queue_list_t *list);
-
-int queue_consume(queue_list_t *queuelist, node_t *node);
-queue_t * queue_get(queue_list_t *ql, queue_id_t qid);
-queue_t * queue_create(queue_list_t *ql, char *name);
-void queue_cancel_node(queue_list_t *queuelist, node_t *node);
-
+queue_t * queue_create(system_data_t *sysdata, char *qname);
 void queue_init(queue_t *queue);
 void queue_free(queue_t *queue);
 void queue_addmsg(queue_t *queue, message_t *msg);
@@ -79,7 +74,6 @@ void queue_addmsg(queue_t *queue, message_t *msg);
 void queue_msg_init(queue_msg_t *msg);
 void queue_msg_free(queue_msg_t *msg);
 
-int queue_id(queue_list_t *ql, char *name);
 void queue_notify(queue_t *queue, void *server);
 
 #endif

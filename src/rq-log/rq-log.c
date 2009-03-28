@@ -585,9 +585,9 @@ int main(int argc, char **argv)
 	assert(control->settings->queue != NULL);
 	if (control->settings->verbose) printf("Consuming queue: %s\n", control->settings->queue);
 
-	rq_consume(control->rq, control->settings->queue, 0, RQ_PRIORITY_NORMAL, message_handler, control);
+	rq_consume(control->rq, control->settings->queue, 0, RQ_PRIORITY_NORMAL, 1, message_handler, control);
 	if (control->settings->levelsqueue != NULL) {
-		rq_consume(control->rq, control->settings->levelsqueue, 0, RQ_PRIORITY_NONE, message_handler, control);
+		rq_consume(control->rq, control->settings->levelsqueue, 0, RQ_PRIORITY_NONE, 0, message_handler, control);
 	}
 	
 	// enter the processing loop.  This function will not return until there is

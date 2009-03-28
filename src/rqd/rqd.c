@@ -195,7 +195,7 @@ int main(int argc, char **argv)
 	sysdata.stats     = NULL;
 	sysdata.actpool   = NULL;
 	sysdata.risp      = NULL;
-	sysdata.queuelist = NULL;
+	sysdata.queues    = NULL;
 	sysdata.msgpool   = NULL;
 
 
@@ -380,7 +380,7 @@ int main(int argc, char **argv)
 	sysdata.server = NULL;
 
 	// The queue list should already be cleared as part of the event shutdown.
-	assert(sysdata.queuelist == NULL);
+	assert(sysdata.queues == NULL);
 	
 	// cleanup risp library.
 	risp_shutdown(risp);

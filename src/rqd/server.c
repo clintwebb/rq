@@ -16,7 +16,6 @@ void server_init(server_t *server, system_data_t *sysdata)
 {
 	int index;
 	settings_t *settings;
-	queue_list_t *ql;
 
 	assert(server != NULL);
 	assert(sysdata != NULL);
@@ -24,6 +23,7 @@ void server_init(server_t *server, system_data_t *sysdata)
 	server->sysdata = sysdata;
 	assert(sysdata->evbase != NULL);
 	assert(sysdata->settings != NULL);
+	assert(sysdata->queues == NULL);
 
 	settings = sysdata->settings;
 	assert(settings->maxconns > 0);
@@ -43,11 +43,6 @@ void server_init(server_t *server, system_data_t *sysdata)
 	}
 
 	server->shutdown = 0;
-
-	ql = (queue_list_t *) malloc(sizeof(queue_list_t));
-	queue_list_init(ql);
-	assert(sysdata->queuelist == NULL);
-	sysdata->queuelist = ql;
 }
 
 
@@ -201,11 +196,8 @@ void server_cleanup(server_t *server)
 	free(server->nodes);
 	server->nodes = NULL;
 
-	// cleanup the list of queues.
-	assert(server->sysdata->queuelist != NULL);
-	queue_list_free((queue_list_t *)server->sysdata->queuelist);
-	free(server->sysdata->queuelist);
-	server->sysdata->queuelist = NULL;
+	// the queues should already have been cleared.
+	assert(server->sysdata->queues == NULL);
 
 	server->sysdata = NULL;
 }
@@ -333,8 +325,6 @@ void server_event_handler(int hid, short flags, void *data)
 					
 					// clear our base out... just to be sure.
 					cmdClear(node);
-
-					nodes++;
 				}
 			}
 		}
@@ -342,11 +332,11 @@ void server_event_handler(int hid, short flags, void *data)
 			if (node == NULL) {
 				if (server->sysdata->verbose) printf("Creating a new node (%d) in slot (%d)\n", sfd, i);
 				node = create_node(server, sfd, i);
-				nodes++;
 			}
 		}
 	}
 	server->active = nodes;
+	assert(server->active >= 0);
 
 	assert(nodes <= server->maxconns);
 	assert(nodes > 0);

@@ -18,7 +18,7 @@ typedef struct {
 	void *settings;
 	void *server;
 	void *stats;
-	void *queuelist;
+	void *queues;
 } system_data_t;
 
 

@@ -20,7 +20,7 @@ void ah_server_shutdown(action_t *action)
 	action_t *fire;
 	stats_t *stats;
 	system_data_t *sysdata;
-	queue_list_t *ql;
+	queue_t *q;
 	int i;
 	short int status;
 	unsigned char verbose = 0;
@@ -31,9 +31,6 @@ void ah_server_shutdown(action_t *action)
 	
 	assert(sysdata->server != NULL);
 	server = sysdata->server;
-
-	assert(sysdata->queuelist != NULL);
-	ql = sysdata->queuelist;
 
 	assert(sysdata->verbose >= 0);
 	verbose = sysdata->verbose;
@@ -76,20 +73,21 @@ void ah_server_shutdown(action_t *action)
 		// fire an action for each queue.
 		assert(sysdata->actpool != NULL);
 		if (verbose) printf("Initiating shutdown of queues.\n");
-		for (i=0; i < ql->queues; i++) {
-			if (ql->list[i] != NULL) {
-				assert(ql->list[i]->name != NULL);
-				assert(ql->list[i]->qid > 0);
-			
-				fire = action_pool_new(sysdata->actpool);
-				action_set(fire, 250, ah_queue_shutdown, ql->list[i]);
-				fire = NULL;
+		q = sysdata->queues;
+		while (q) {
+			assert(q->name != NULL);
+			assert(q->qid > 0);
+	
+			fire = action_pool_new(sysdata->actpool);
+			action_set(fire, 250, ah_queue_shutdown, q);
+			fire = NULL;
+	
+			if (verbose)
+				printf("Initiating shutdown of queue %d ('%s').\n",
+					q->qid,
+					q->name);
 
-				if (verbose)
-					printf("Initiating shutdown of queue %d ('%s').\n",
-						ql->list[i]->qid,
-						ql->list[i]->name);
-			}
+			q = q->next;
 		}
 
 		// fire this action again, because we are not finished.
@@ -118,14 +116,8 @@ void ah_server_shutdown(action_t *action)
 		
 				
 		// check that all queues have been stopped.
-		// TODO: We dont really need to do this... only to show if we are waiting on queues... because the events will stick in the event loop until they are done anyway.
 		if (status == 0) {
-			for (i=0; status == 0 && i < ql->queues; i++) {
-				if (ql->list[i] != NULL) {
-					status ++;
-				}
-			}
-			if (status > 0 && verbose)
+			if (sysdata->queues && verbose)
 				printf("Waiting for queues to shutdown.\n");
 		}
 		
@@ -185,8 +177,8 @@ void ah_node_shutdown(action_t *action)
 		}
 
 		// if the node is consuming any queues, we need to cancel them (internally)
-		assert(sysdata->queuelist);
-		queue_cancel_node(sysdata->queuelist, node);
+		assert(sysdata->queues);
+		queue_cancel_node(sysdata->queues, node);
 
 		// send out a message to the node telling them that the server is going offline.
 		sendClosing(node);
@@ -212,10 +204,8 @@ void ah_node_shutdown(action_t *action)
 // been stopped, then we can exit.
 void ah_queue_shutdown(action_t *action)
 {
+	queue_t *queue, *tmp;
 	system_data_t *sysdata;
-	queue_list_t *ql;
-	queue_t *queue;
-	int i;
 	
 	assert(action != NULL);
 
@@ -234,26 +224,21 @@ void ah_queue_shutdown(action_t *action)
 	
 	// delete the list of nodes that are consuming this queue.
 	assert(0);   // code needs to be changed.
-/*	
-	if (queue->nodelist != NULL) {
-		free(queue->nodelist);
-		queue->nodelist = NULL;
-		queue->nodes = 0;
-	}
-	assert(queue->nodelist == NULL && queue->nodes == 0);
-*/
+	
 	// Delete the queue from the queue list.
-	ql = sysdata->queuelist;
-	assert(ql);
-	assert((ql->queues == 0 && ql->list == NULL) || (ql->queues > 0 && ql->list != NULL));
-	assert(queue != NULL);
-	for (i=0; i < ql->queues; i++) {
-		if (ql->list[i] == queue) {
-			assert(ql->list[i]);
-			queue_free(ql->list[i]);
-			free(ql->list[i]);
-			ql->list[i] = NULL;
-			break;
+	tmp = sysdata->queues;
+	assert(tmp);
+	while (tmp) {
+		if (tmp == queue) {
+			if (sysdata->queues == tmp) sysdata->queues = tmp->next;
+			if (tmp->prev) tmp->prev->next = tmp->next;
+			if (tmp->next) tmp->next->prev = tmp->prev;
+			queue_free(tmp);
+			free(tmp);
+			tmp = NULL;
+		}
+		else {
+			tmp = tmp->next;
 		}
 	}
 
@@ -269,10 +254,8 @@ void ah_stats(action_t *action)
 {
 	int clients;
 	int queues;
-	int i;
 	system_data_t *sysdata;
 	stats_t *stats;
-	queue_list_t *ql;
 	queue_t *q;
 	server_t *server;
 	
@@ -283,24 +266,19 @@ void ah_stats(action_t *action)
 	sysdata = action->shared;
 	stats = action->data;
 
-	assert(sysdata->queuelist != NULL);
-	ql = sysdata->queuelist;
-	
 	assert(sysdata->server != NULL);
 	server = sysdata->server;
 
 	assert(server->active >= 0);
 	clients = server->active;
 
-	assert((ql->queues == 0 && ql->list == NULL) || (ql->queues > 0 && ql->list != NULL));
 	queues = 0;
-	for (i=0; i < ql->queues; i++) {
-		q = ql->list[i];
-		if (q != NULL) {
-			assert(q->name != NULL);
-			assert(q->qid > 0);
-			queues ++;
-		}
+	q = sysdata->queues;
+	while (q) {
+		assert(q->name != NULL);
+		assert(q->qid > 0);
+		queues ++;
+		q = q->next;
 	}
 
 	assert(stats != NULL);
