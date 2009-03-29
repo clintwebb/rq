@@ -21,7 +21,6 @@ typedef struct {
 		struct event event;
 	} servers[MAX_SERVERS];
 	int                active;			// number of active nodes.
-	int                maxconns;		// max number of nodes.
 	node_t            *nodelist;		// array of node objects (x maxconns).
 	short              shutdown;
 	system_data_t     *sysdata;
