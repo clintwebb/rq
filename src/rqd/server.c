@@ -198,6 +198,9 @@ static node_t * create_node(server_t *server, int handle)
 	assert(server != NULL);
 	assert(server->sysdata != NULL);
 	assert(server->sysdata->evbase != NULL);
+	assert(server->maxconns > 0);
+	assert(server->active < server->maxconns);
+	assert(server->active >= 0);
 
 	printf("create_node(): active=%d, maxconns=%d\n", server->active, server->maxconns);
 	
@@ -268,6 +271,7 @@ void server_event_handler(int hid, short flags, void *data)
 	if (server->sysdata->verbose) printf("New Connection [%d]\n", sfd);
 	node = create_node(server, sfd);
 	if (node == NULL) {
+		assert(server->maxconns > 0);
 		assert(server->active == server->maxconns);
 		if (server->sysdata->verbose) printf("Server is full.\n");
 
@@ -303,6 +307,7 @@ void server_event_handler(int hid, short flags, void *data)
 
 		server->active ++;
 		assert(server->active > 0);
+		assert(server->active <= server->maxconns);
 	}
 }
 

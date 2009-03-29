@@ -255,6 +255,8 @@ int main(int argc, char **argv)
 	server_init(server, &sysdata);
 	assert(server->sysdata == &sysdata);
 	sysdata.server = server;
+	assert(settings->maxconns > 0);
+	server->maxconns = settings->maxconns;
 	
 	assert(settings->port > 0);
 	if (settings->interfaces == 0) {
