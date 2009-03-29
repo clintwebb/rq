@@ -41,22 +41,32 @@ void node_init(node_t *node, system_data_t *sysdata)
 	node->msglist = NULL;
 	node->messages = 0;
 
+	node->next = NULL;
+	node->prev = NULL;
+
 	data_init(&node->data);
 	
-	node_clear(node);
-	assert(node->flags == 0);
+	node->flags = 0;
+	
+	assert(node->handle == INVALID_HANDLE);
+	memset(&node->event, 0, sizeof(node->event));
 }
 
 
 
+
 //-----------------------------------------------------------------------------
-// used to clear a previously valid node.
-void node_clear(node_t *node)
+// prepare a node for de-allocation.  This means freeing buffers too.
+void node_free(node_t *node)
 {
+	assert(node != NULL);
 	int i;
 	system_data_t *sysdata;
 	
 	assert(node != NULL);
+
+	assert(node->next == NULL);
+	assert(node->prev == NULL);
 
 	assert(node->sysdata != NULL);
 	sysdata = node->sysdata;
@@ -109,14 +119,6 @@ void node_clear(node_t *node)
 		queue_cancel_node(node->sysdata->queues, node);
 	
 	data_clear(&node->data);
-}
-
-//-----------------------------------------------------------------------------
-// prepare a node for de-allocation.  This means freeing buffers too.
-void node_free(node_t *node)
-{
-	assert(node != NULL);
-	node_clear(node);
 
 	if (node->msglist)  {
 		free(node->msglist);
@@ -166,8 +168,10 @@ static void node_closed(node_t *node)
 	}
 
 	node->handle = INVALID_HANDLE;
-	node_clear(node);
 	assert(node->flags == 0);
+
+	// need to fire an action to actually delete this node from the server nodeslist.
+	assert(0);
 }
 
 

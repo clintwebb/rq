@@ -21,8 +21,8 @@ void ah_server_shutdown(action_t *action)
 	stats_t *stats;
 	system_data_t *sysdata;
 	queue_t *q;
+	node_t *node;
 	int i;
-	short int status;
 	unsigned char verbose = 0;
 	
 	assert(action != NULL);
@@ -55,21 +55,22 @@ void ah_server_shutdown(action_t *action)
 		// All active nodes should be informed that we are shutting down.
 		assert(sysdata->actpool != NULL);
 		if (verbose) printf("Firing event to shutdown nodes.\n");
-		for (i=0; i<server->maxconns; i++) {
-			if (server->nodes[i] != NULL) {
-				if (server->nodes[i]->handle != INVALID_HANDLE) {
-					// fire action_node_shutdown events for each node.
-					fire = action_pool_new(sysdata->actpool);
-					action_set(fire, 250, ah_node_shutdown, server->nodes[i]);
-					fire = NULL;
+		node = server->nodelist;
+		while (node) {
+			
+			assert(node->handle > 0);
+			
+			// fire action_node_shutdown events for each node.
+			fire = action_pool_new(sysdata->actpool);
+			action_set(fire, 250, ah_node_shutdown, node);
+			fire = NULL;
 
-					if (verbose)
-						printf("Initiating shutdown of node %d.\n", server->nodes[i]->handle);
-				}
-			}
-		} 
+			if (verbose)
+				printf("Initiating shutdown of node %d.\n", node->handle);
 		
-
+			node = node->next;
+		}
+		
 		// fire an action for each queue.
 		assert(sysdata->actpool != NULL);
 		if (verbose) printf("Initiating shutdown of queues.\n");
@@ -98,30 +99,13 @@ void ah_server_shutdown(action_t *action)
 	else if (server->shutdown == 1) {
 		// if already shutting down
 
-		// this status counter will start at zero, and will increment if we find
-		// anything that hasn't shutdown yet.
-		status = 0;
-		
-
 		// check that all nodes have shutdown.
-		for (i=0; status == 0 && i < server->maxconns; i++) {
-			if (server->nodes[i] != NULL) {
-				if (server->nodes[i]->handle != INVALID_HANDLE) {
-					status ++;
-				}
-			}
-		}
-		if (status > 0 && verbose)
-			printf("Waiting for nodes to shutdown.\n");
+		if (server->nodelist && verbose)
+			printf("Waiting for %d nodes to shutdown.\n", server->active);
+		else if (sysdata->queues && verbose)
+			printf("Waiting for queues to shutdown.\n");
 		
-				
-		// check that all queues have been stopped.
-		if (status == 0) {
-			if (sysdata->queues && verbose)
-				printf("Waiting for queues to shutdown.\n");
-		}
-		
-		if (status == 0) {
+		if (server->nodelist == NULL && sysdata->queues == NULL) {
 			// we are good to quit.
 			// stop stats timer event.
 			assert(sysdata != NULL);
@@ -334,7 +318,7 @@ void ah_queue_notify(action_t *action)
 	system_data_t *sysdata;
 	queue_t *queue;
 	server_t *server;
-	int i;
+	node_t *node;
 	
 	assert(action);
 	
@@ -351,13 +335,13 @@ void ah_queue_notify(action_t *action)
 
 	// now that we have our server object, we can go thru the list of nodes.  If
 	// any of them are controllers, then we need to send a consume request.
-	for (i=0; i<server->maxconns; i++) {
-		assert(server->nodes);
-		if (server->nodes[i] != NULL) {
-			if (BIT_TEST(server->nodes[i]->flags, FLAG_NODE_CONTROLLER)) {
-				sendConsume(server->nodes[i], queue->name, 1, QUEUE_LOW_PRIORITY);
-			}
+	node = server->nodelist;
+	while (node) {
+		if (BIT_TEST(node->flags, FLAG_NODE_CONTROLLER)) {
+			sendConsume(node, queue->name, 1, QUEUE_LOW_PRIORITY);
 		}
+		
+		node = node->next;
 	}
 
 	// return the action to the action pool.

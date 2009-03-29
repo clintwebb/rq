@@ -22,7 +22,7 @@ typedef struct {
 	} servers[MAX_SERVERS];
 	int                active;			// number of active nodes.
 	int                maxconns;		// max number of nodes.
-	node_t           **nodes;				// array of node objects (x maxconns).
+	node_t            *nodelist;		// array of node objects (x maxconns).
 	short              shutdown;
 	system_data_t     *sysdata;
 } server_t;

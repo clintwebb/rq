@@ -18,7 +18,7 @@
 #define FLAG_NODE_CLOSING 		0x02
 #define FLAG_NODE_CONTROLLER	0x04
 
-typedef struct {
+typedef struct __node_t {
 	int handle;
 	unsigned short flags;
 	struct event event;
@@ -28,11 +28,12 @@ typedef struct {
 
 	message_t **msglist;
 	int messages;
+
+	struct __node_t *next, *prev;
 } node_t ;
 
 
 void node_init(node_t *node, system_data_t *sysdata);
-void node_clear(node_t *node);
 void node_free(node_t *node);
 
 void node_write_now(node_t *node, int length, char *data);

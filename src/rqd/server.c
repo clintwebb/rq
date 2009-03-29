@@ -32,16 +32,8 @@ void server_init(server_t *server, system_data_t *sysdata)
 		server->servers[index].handle = INVALID_HANDLE;
 	}
 
-	// We will create an array of empty pointers for our nodes.  A pointer
-	// doesn't take up much space, and we already know what our maximum is.
-	// It will save a lot of detail in having to resize this array dynamically.
-	assert(settings->maxconns > 0);
-	server->maxconns = settings->maxconns;
-	server->nodes = (node_t **) malloc(sizeof(node_t *) * server->maxconns);
-	for (index=0; index < server->maxconns; index++) {
-		server->nodes[index] = NULL;
-	}
-
+	server->active = 0;
+	server->nodelist = NULL;
 	server->shutdown = 0;
 }
 
@@ -186,15 +178,7 @@ void server_cleanup(server_t *server)
 	// cleanup and free all of the allocated nodes which should all be cleaned out and idle now;
 	assert(server->active == 0);
 	assert(server->maxconns > 0);
-	assert(server->nodes != NULL);
-	for (i=0; i<server->maxconns; i++) {
-		if (server->nodes[i] != NULL) {
-			node_free(server->nodes[i]);
-			server->nodes[i] = NULL;
-		}
-	}
-	free(server->nodes);
-	server->nodes = NULL;
+	assert(server->nodelist == NULL);
 
 	// the queues should already have been cleared.
 	assert(server->sysdata->queues == NULL);
@@ -206,16 +190,18 @@ void server_cleanup(server_t *server)
 // we have an array of node connections.  This function will be used to create
 // a new node connection and put it in the array.  This only has to be done
 // once for each slot.  Once it is created, it is re-used.
-static node_t * create_node(server_t *server, int handle, int slot)
+static node_t * create_node(server_t *server, int handle)
 {
 	node_t *node;
 	
 	assert(handle > 0);
 	assert(server != NULL);
-	assert(slot >= 0);
-	assert(slot < server->maxconns);
 	assert(server->sysdata != NULL);
 	assert(server->sysdata->evbase != NULL);
+
+	printf("create_node(): active=%d, maxconns=%d\n", server->active, server->maxconns);
+	
+	assert(server->active < server->maxconns);
 	
 	node = (node_t *) malloc(sizeof(node_t));
 	assert(node != NULL);
@@ -223,8 +209,6 @@ static node_t * create_node(server_t *server, int handle, int slot)
 
 		assert(server->sysdata->bufpool != NULL);
 		node_init(node, server->sysdata);
-	
-		server->nodes[slot] = node;
 		node->handle = handle;
 				
 		assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE) == 0);
@@ -255,7 +239,6 @@ void server_event_handler(int hid, short flags, void *data)
 	struct sockaddr_storage addr;
 	int sfd;
 	node_t *node = NULL;
-	int i, nodes;
 	char tbuf[4];
 	
 	assert(hid >= 0);
@@ -280,70 +263,12 @@ void server_event_handler(int hid, short flags, void *data)
 		}
 		return;
 	}
-	
+
 
 	if (server->sysdata->verbose) printf("New Connection [%d]\n", sfd);
-
-	node = NULL;
-
-	if (sfd < server->maxconns) {
-		if (server->nodes[sfd] == NULL) {
-			if (server->sysdata->verbose) printf("Creating a new node (%d)\n", sfd);
-	
-			node = create_node(server, sfd, sfd);
-			
-			if (server->sysdata->verbose) printf(" -- node(%d) initialised\n", sfd);
-		}
-		else if (BIT_TEST(server->nodes[sfd]->flags, FLAG_NODE_ACTIVE) == 0) {
-			if (server->sysdata->verbose) printf("Re-using an existing node (%d)\n", sfd);
-
-			node = server->nodes[sfd];
-			node->handle = sfd;
-			BIT_SET(node->flags, FLAG_NODE_ACTIVE);
-			assert(node->sysdata != NULL);
-			
-			// clear our base out... just to be sure.
-			cmdClear(node);
-		}
-	}
-
-	// Go thru the list of nodes and count the number of active ones.  If we
-	// didn't find a slot easily, we can use the first available one we find.
-	nodes = 0;
-	for (i=0; i<server->maxconns; i++) {
-		if (server->nodes[i] != NULL) {
-			if (BIT_TEST(server->nodes[i]->flags, FLAG_NODE_ACTIVE)) {
-				nodes++;
-			}
-			else {
-				if (node == NULL) {
-					if (server->sysdata->verbose) printf("Re-using an existing node (%d) in slot (%d)\n", sfd, i);
-		
-					node = server->nodes[sfd];
-					node->handle = sfd;
-					BIT_SET(node->flags, FLAG_NODE_ACTIVE);
-					
-					// clear our base out... just to be sure.
-					cmdClear(node);
-				}
-			}
-		}
-		else {
-			if (node == NULL) {
-				if (server->sysdata->verbose) printf("Creating a new node (%d) in slot (%d)\n", sfd, i);
-				node = create_node(server, sfd, i);
-			}
-		}
-	}
-	server->active = nodes;
-	assert(server->active >= 0);
-
-	assert(nodes <= server->maxconns);
-	assert(nodes > 0);
-
+	node = create_node(server, sfd);
 	if (node == NULL) {
-		assert(nodes == server->maxconns);
-
+		assert(server->active == server->maxconns);
 		if (server->sysdata->verbose) printf("Server is full.\n");
 
 		// we've reached our limit.
@@ -355,7 +280,6 @@ void server_event_handler(int hid, short flags, void *data)
 		close(sfd);
 	}
 	else {
-		
 		// mark socket as non-blocking
 		if (server->sysdata->verbose) printf(" -- node(%d) setting non-blocking mode\n", sfd);
 		if ((flags = fcntl(sfd, F_GETFL, 0)) < 0 || fcntl(sfd, F_SETFL, flags | O_NONBLOCK) < 0) {
@@ -370,6 +294,12 @@ void server_event_handler(int hid, short flags, void *data)
 		event_set(&node->event, sfd, EV_READ | EV_PERSIST, node_event_handler, (void *)node);
 		event_base_set(server->sysdata->evbase, &node->event);
 		event_add(&node->event, 0);
+
+		// add the node to the nodelist.
+		node->next = server->nodelist;
+		if (server->nodelist) server->nodelist->prev = node;
+		assert(node->prev == NULL);
+		server->nodelist = node;
 
 		server->active ++;
 		assert(server->active > 0);
