@@ -154,8 +154,7 @@ void ah_node_shutdown(action_t *action)
 		}
 
 		// if the node is consuming any queues, we need to cancel them (internally)
-		assert(sysdata->queues);
-		queue_cancel_node(sysdata->queues, node);
+		queue_cancel_node(node);
 
 		// send out a message to the node telling them that the server is going offline.
 		sendClosing(node);

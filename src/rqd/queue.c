@@ -181,36 +181,32 @@ void queue_notify(queue_t *queue, void *pserver)
 // When a node needs to cancel all the queues that it is consuming, then we go
 // thru the queue list, and remove the node from any of them.  At the point of
 // invocation, the node does not know what queues it is consuming.
-void queue_cancel_node(queue_t *head, node_t *node)
+void queue_cancel_node(node_t *node)
 {
-	queue_t *tmp;
+	queue_t *queue;
 	node_queue_t *nq;
 	int found;
-
-	// is this really the right way of doing this?
-	assert(0);
 	
-	assert(head);
 	assert(node);
 	assert(node->sysdata);
 
-	tmp = head;
-	while (tmp) {
-		assert(tmp->qid > 0);
-		assert(tmp->name);
+	queue = node->sysdata->queues;
+	while (queue) {
+		assert(queue->qid > 0);
+		assert(queue->name);
 
 		found = 0;
 		
 		// need to check this node in the busy
-		nq = tmp->busy;
+		nq = queue->busy;
 		while (nq && found == 0) {
 
 			assert(nq->node);
 			if (nq->node == node) {
 				if (node->sysdata->verbose)
-					printf("queue %d:'%s' removing node:%d from busy list\n", tmp->qid, tmp->name, node->handle);
+					printf("queue %d:'%s' removing node:%d from busy list\n", queue->qid, queue->name, node->handle);
 
-				if (nq == tmp->busy) tmp->busy = nq->next;
+				if (nq == queue->busy) queue->busy = nq->next;
 				if (nq->next) nq->next->prev = nq->prev;
 				if (nq->prev) nq->prev->next = nq->next;
 
@@ -224,16 +220,16 @@ void queue_cancel_node(queue_t *head, node_t *node)
 		}
 		
 		// ready
-		nq = tmp->ready_head;
+		nq = queue->ready_head;
 		while (nq && found == 0) {
 
 			assert(nq->node);
 			if (nq->node == node) {
 				if (node->sysdata->verbose)
-					printf("queue %d:'%s' removing node:%d from ready list\n", tmp->qid, tmp->name, node->handle);
+					printf("queue %d:'%s' removing node:%d from ready list\n", queue->qid, queue->name, node->handle);
 
-				if (nq == tmp->ready_head) tmp->ready_head = nq->next;
-				if (nq == tmp->ready_tail) tmp->ready_tail = nq->prev;
+				if (nq == queue->ready_head) queue->ready_head = nq->next;
+				if (nq == queue->ready_tail) queue->ready_tail = nq->prev;
 				if (nq->next) nq->next->prev = nq->prev;
 				if (nq->prev) nq->prev->next = nq->next;
 
@@ -243,19 +239,51 @@ void queue_cancel_node(queue_t *head, node_t *node)
 			}
 			else {
 				nq = nq->next;
+			}
+		}
+
+		if (found != 0) {
+			// The node was found already.  If the queue was in exclusive mode, need
+			// to update the lists and activate the one that is waiting.
+
+			if (BIT_TEST(queue->flags, QUEUE_FLAG_EXCLUSIVE)) {
+				// queue was already in exclusive mode, and we have removed a node, so that means our main lists should be empty.
+				assert(queue->ready_head == NULL);
+				assert(queue->ready_tail == NULL);
+				assert(queue->busy == NULL);
+
+				if (queue->waitinglist) {
+
+					nq = queue->waitinglist;
+					queue->ready_head = nq;
+					queue->ready_tail = nq;
+
+					assert(nq->prev == NULL);
+					if (nq->next) nq->next->prev = NULL;
+					queue->waitinglist = nq->next;
+					nq->next = NULL;
+
+					if (queue->msghead) {
+						// there are messages that need to be delivered.  Not sure yet, whether to assign an action to do this, or what...
+						assert(0);
+					}
+
+					if (node->sysdata->verbose)
+						printf("Promoting waiting node:%d to EXCLUSIVE queue '%s'.\n", nq->node->handle, queue->name);
+				}
 			}
 		}
 		
 		// and waiting list.
-		nq = tmp->waitinglist;
+		nq = queue->waitinglist;
 		while (nq && found == 0) {
 
 			assert(nq->node);
 			if (nq->node == node) {
 				if (node->sysdata->verbose)
-					printf("queue %d:'%s' removing node:%d from waitinglist\n", tmp->qid, tmp->name, node->handle);
+					printf("queue %d:'%s' removing node:%d from waitinglist\n", queue->qid, queue->name, node->handle);
 
-				if (nq == tmp->waitinglist) tmp->waitinglist = nq->next;
+				if (nq == queue->waitinglist) queue->waitinglist = nq->next;
 				if (nq->next) nq->next->prev = nq->prev;
 				if (nq->prev) nq->prev->next = nq->next;
 
@@ -268,14 +296,14 @@ void queue_cancel_node(queue_t *head, node_t *node)
 			}
 		}
 
-		tmp = tmp->next;
+		queue = queue->next;
 	}
 }
 
 
 
 queue_t * queue_create(system_data_t *sysdata, char *qname)
-{
+{ 
 	queue_t *q;
 	action_t *action;
 

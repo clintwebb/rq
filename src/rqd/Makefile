@@ -43,7 +43,7 @@ daemon.o: daemon.c daemon.h
 message.o: message.c $(H_message) $(H_queue)
 	gcc -c -o $@ message.c $(ARGS)
 
-node.o: node.c $(H_node) $(H_data) $(H_stats) $(H_queue)
+node.o: node.c $(H_node) $(H_data) $(H_stats) $(H_queue) $(H_actions)
 	gcc -c -o $@ node.c $(ARGS)
 
 process.o: process.c $(H_process) $(H_send) $(H_queue) $(H_message) $(H_actions)

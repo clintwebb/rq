@@ -64,7 +64,7 @@ typedef struct __queue_t {
 
 queue_t * queue_get_id(queue_t *head, queue_id_t qid);
 queue_t * queue_get_name(queue_t *head, const char *qname);
-void queue_cancel_node(queue_t *head, node_t *node);
+void queue_cancel_node(node_t *node);
 
 queue_t * queue_create(system_data_t *sysdata, char *qname);
 void queue_init(queue_t *queue);

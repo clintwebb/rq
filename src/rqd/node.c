@@ -1,9 +1,10 @@
 // node.c
 
-#include "node.h"
+#include "actions.h"
 #include "data.h"
-#include "stats.h"
+#include "node.h"
 #include "queue.h"
+#include "stats.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -33,7 +34,8 @@ void node_init(node_t *node, system_data_t *sysdata)
 	
 	assert(sysdata->bufpool != NULL);
 	
-	node->in = NULL;
+  assert(DEFAULT_BUFFSIZE > 0);
+  node->in = expbuf_pool_new(sysdata->bufpool, DEFAULT_BUFFSIZE);
 	node->waiting = NULL;
 	node->out = NULL;
 	node->build = NULL;
@@ -73,7 +75,7 @@ void node_free(node_t *node)
 		assert(node->event.ev_base != NULL);
 		event_del(&node->event);
 	}
-
+	
 	node->flags = 0;
 	
 	assert(node->handle == INVALID_HANDLE);
@@ -106,7 +108,7 @@ void node_free(node_t *node)
 
 	// make sure that this node has been removed from all consumer queues.
 	if (node->sysdata->queues)
-		queue_cancel_node(node->sysdata->queues, node);
+		queue_cancel_node(node);
 	
 	data_clear(&node->data);
 
@@ -124,13 +126,14 @@ void node_free(node_t *node)
 static void node_closed(node_t *node)
 {
 	message_t *msg;
+	action_t *action;
 	
 	assert(node != NULL);
 	assert(node->sysdata != NULL);
 
 	// we need to remove the consume on the queues.
 	if (node->sysdata->queues)
-		queue_cancel_node(node->sysdata->queues, node);
+		queue_cancel_node(node);
 
 	// we need to remove (return) any messages that this node was processing.
 	msg = node->msglist;
@@ -149,11 +152,14 @@ static void node_closed(node_t *node)
 		msg = msg->next;
 	}
 	
+	// need to cancel the event.
+	if (BIT_TEST(node->flags, FLAG_NODE_ACTIVE)) {
+		assert(node->event.ev_base != NULL);
+		event_del(&node->event);
+		BIT_CLEAR(node->flags, FLAG_NODE_ACTIVE);
+	}
+	
 	node->handle = INVALID_HANDLE;
-	assert(node->flags == 0);
-
-	// need to fire an action to actually delete this node from the server nodeslist.
-	assert(0);
 }
 
 
@@ -170,14 +176,9 @@ static void node_read(node_t *node)
 	assert(node->sysdata != NULL);
 	assert(node->sysdata->stats != NULL);
 	assert(node->sysdata->bufpool != NULL);
+	assert(node->in);
 
 	stats = node->sysdata->stats;
-
-	if (node->in == NULL) {
-		assert(DEFAULT_BUFFSIZE > 0);
-		node->in = expbuf_pool_new(node->sysdata->bufpool, DEFAULT_BUFFSIZE);
-	}
-	assert(node->in != NULL);
 
 	empty = 0;
 	while (empty == 0) {
@@ -416,11 +417,16 @@ void node_event_handler(int hid, short flags, void *data)
 	node_t *node;
 	node = (node_t *) data;
 
+
 	assert(hid >= 0);
 	assert(node != NULL);
-	assert(node->handle == hid);
 	assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE));
 	assert(node->sysdata != NULL);
+	
+	if (node->sysdata->verbose > 1)
+		printf("node_event_handler: hid=%d, node->handle=%d, flags=%d\n", hid, node->handle, flags);
+
+	assert(node->handle == hid);
 	
 	if (flags & EV_READ) {
 		if (node->sysdata->verbose)
