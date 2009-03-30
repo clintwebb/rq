@@ -20,6 +20,8 @@ void message_init(message_t *msg, system_data_t *sysdata)
 	msg->source_node = NULL;
 	msg->target_node = NULL;
 	msg->queue = NULL;
+	msg->next = NULL;
+	msg->prev = NULL;
 	msg->sysdata = sysdata;
 }
 
@@ -35,7 +37,9 @@ void message_free(message_t *msg)
 		expbuf_pool_return(msg->sysdata->bufpool, msg->data);
 		msg->data = NULL;
 	}
-	
+
+	assert(msg->next == NULL && msg->prev == NULL);
+		
 	msg->source_node = NULL;
 	msg->target_node = NULL;
 	msg->queue = NULL;

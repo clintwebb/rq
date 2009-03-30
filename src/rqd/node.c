@@ -39,7 +39,6 @@ void node_init(node_t *node, system_data_t *sysdata)
 	node->build = NULL;
 
 	node->msglist = NULL;
-	node->messages = 0;
 
 	node->next = NULL;
 	node->prev = NULL;
@@ -53,14 +52,11 @@ void node_init(node_t *node, system_data_t *sysdata)
 }
 
 
-
-
 //-----------------------------------------------------------------------------
 // prepare a node for de-allocation.  This means freeing buffers too.
 void node_free(node_t *node)
 {
 	assert(node != NULL);
-	int i;
 	system_data_t *sysdata;
 	
 	assert(node != NULL);
@@ -104,15 +100,9 @@ void node_free(node_t *node)
 		node->build = NULL;
 	}
 
-	// make sure that all the messages for this node have been processed first.  And then free the memory that was used for the list.
-	assert((node->msglist == NULL && node->messages == 0) || (node->msglist != NULL && node->messages > 0));
-	for (i=0; i < node->messages; i++) {
-		assert(node->msglist[i] == NULL);
-	}
-	if (node->msglist) {
-		free(node->msglist);
-		node->msglist = NULL;
-	}
+	// make sure that all the messages for this node have been processed first.
+	// And then free the memory that was used for the list.
+	assert(node->msglist == NULL);
 
 	// make sure that this node has been removed from all consumer queues.
 	if (node->sysdata->queues)
@@ -120,12 +110,6 @@ void node_free(node_t *node)
 	
 	data_clear(&node->data);
 
-	if (node->msglist)  {
-		free(node->msglist);
-		node->msglist = NULL;
-		node->messages = 0;
-	}
-	
 	assert(node->sysdata != NULL);
 	node->sysdata = NULL;
 	
@@ -139,7 +123,7 @@ void node_free(node_t *node)
 // will also cancel any requests that were pending replies to the node.
 static void node_closed(node_t *node)
 {
-	int i;
+	message_t *msg;
 	
 	assert(node != NULL);
 	assert(node->sysdata != NULL);
@@ -149,24 +133,22 @@ static void node_closed(node_t *node)
 		queue_cancel_node(node->sysdata->queues, node);
 
 	// we need to remove (return) any messages that this node was processing.
-// 	message_t **msglist;
-// 	int messages;
-	assert((node->messages == 0 && node->msglist == NULL) || (node->messages > 0 && node->msglist != NULL));
-	for (i=0; i < node->messages; i++) {
-		if (node->msglist[i]) {
-			// we have a message that we need to deal with.
+	msg = node->msglist;
+	while (msg) {
+		// we have a message that we need to deal with.
 
-			// if this node was a destination for the message then we need to return a FAILURE to the source.
-			assert(0);
+		// if this node was a destination for the message then we need to return a FAILURE to the source.
+		assert(0);
 
-			// if this node was a source, we need to send a CANCEL to the destination.
-			assert(0);
+		// if this node was a source, we need to send a CANCEL to the destination.
+		assert(0);
 
-			// detatch message from node, and the node from the message and then set an action to deal with the message.
-			assert(0);
-		}
+		// detatch message from node, and the node from the message and then set an action to deal with the message.
+		assert(0);
+		
+		msg = msg->next;
 	}
-
+	
 	node->handle = INVALID_HANDLE;
 	assert(node->flags == 0);
 

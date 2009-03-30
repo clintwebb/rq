@@ -208,7 +208,7 @@ void cmdExclusive(void *base)
  	// set our specific flag.
 	node->data.flags |= DATA_FLAG_EXCLUSIVE;
 	// ensure only the legal data is used.
-	node->data.mask &= ( DATA_MASK_QUEUE );
+	node->data.mask &= ( DATA_MASK_QUEUE | DATA_MASK_MAX | DATA_MASK_PRIORITY);
 
 	assert(node->sysdata != NULL);
 	assert(node->sysdata->verbose >= 0);
@@ -222,8 +222,11 @@ void cmdConsume(void *base)
 	node_t *node = (node_t *) base;
  	assert(node != NULL);
 
+ 	// ensure only the flags that are valid.
+ 	node->data.flags &= (DATA_FLAG_EXCLUSIVE);
+ 	
 	// a CONSUME command should not have any other flags.
-	node->data.flags = DATA_FLAG_CONSUME;
+	node->data.flags |= DATA_FLAG_CONSUME;
 	
 	// ensure only the legal data is used.
 	node->data.mask &= (DATA_MASK_QUEUE | DATA_MASK_MAX | DATA_MASK_PRIORITY);

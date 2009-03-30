@@ -13,13 +13,14 @@
 #define FLAG_MSG_NOREPLY		0x02
 #define FLAG_MSG_KEEP				0x04
 
-typedef struct {
+typedef struct __message_t {
 	unsigned int id;
 	unsigned int flags;	
 	expbuf_t *data;
 	void *source_node;
 	void *target_node;
 	void *queue;
+	struct __message_t *next, *prev;
 	system_data_t *sysdata;
 } message_t;
 

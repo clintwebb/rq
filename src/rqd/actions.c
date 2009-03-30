@@ -136,8 +136,6 @@ void ah_node_shutdown(action_t *action)
 {
 	system_data_t *sysdata;
 	node_t *node;
-	int pending = 0;
-	int i;
 
 	assert(action != NULL);
 	assert(action->shared != NULL);
@@ -149,15 +147,10 @@ void ah_node_shutdown(action_t *action)
 
 	if (BIT_TEST(node->flags, FLAG_NODE_CLOSING) == 0) {
 		
-		// if this is the first time for the node, we need to look at all the messages it is servicing and we need to put a timeout on it.
-		assert(node);
-		for (i=0; i < node->messages; i++) {
-			if (node->msglist[i] != NULL) {
-
-				
-
-				assert(0);
-			}
+		// if this is the first time for the node, we need to look at all the
+		// messages it is servicing and we need to put a timeout on it.
+		if(node->msglist) {
+			assert(0);
 		}
 
 		// if the node is consuming any queues, we need to cancel them (internally)
@@ -169,14 +162,7 @@ void ah_node_shutdown(action_t *action)
 		BIT_SET(node->flags, FLAG_NODE_CLOSING);
 	}
 
-	// we need to make sure that the node doesnt have any pending requests.
-	for (i=0; i < node->messages && pending == 0; i++) {
-		if (node->msglist[i] != NULL) {
-			pending ++;
-		}
-	}
-
-	if (pending == 0) { action_pool_return(action); }
+	if (node->msglist == NULL) { action_pool_return(action); }
 	else { action_reset(action); }
 }
 

@@ -164,8 +164,8 @@ void processConsume(node_t *node)
 		// check to see if the current queue settings are for it to be
 		// exclusive.   If so, then we will need to add this node to the waiting
 		// list.
-		if (BIT_TEST(q->flags, QUEUE_FLAG_EXCLUSIVE)) {
-			// The queue is already in exclusive mode.  So this node would need to
+		if (BIT_TEST(q->flags, QUEUE_FLAG_EXCLUSIVE) || q->ready_head || q->busy) {
+			// The queue is already in exclusive mode (or already has members that are not exlusive).  So this node would need to
 			// be added to the waiting list.
 
 			assert(nq->prev == NULL);
@@ -180,6 +180,19 @@ void processConsume(node_t *node)
 				printf("processConsume - Defered, queue already consumed exclusively.\n");
 		}
 		else {
+			
+			// if the consume request was for an EXCLUSIVE queue (and since we got
+			// this far it means that no other nodes are consuming this queue yet),
+			// then we mark it as exclusive.
+			if (BIT_TEST(node->data.flags, DATA_FLAG_EXCLUSIVE)) {
+				assert(q->ready_head == NULL);
+				assert(q->ready_tail == NULL);
+				assert(q->busy == NULL);
+				q->flags |= QUEUE_FLAG_EXCLUSIVE;
+				if (node->sysdata->verbose)
+					printf("Consuming Queue '%s' in EXCLUSIVE mode.\n", expbuf_string(&node->data.queue));
+			}
+
 			// add the node to the appropriate list.
 			assert(nq->prev == NULL);
 			nq->next = q->ready_head;
@@ -189,6 +202,7 @@ void processConsume(node_t *node)
 				q->ready_head->prev = nq;
 			}
 			q->ready_head = nq;
+			
 			
 			// send reply back to the node.
 			sendConsumeReply(node, q->name, q->qid);

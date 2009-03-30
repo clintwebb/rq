@@ -25,10 +25,7 @@ typedef struct __node_t {
 	expbuf_t *in, *waiting, *out, *build;
 	data_t data;
 	system_data_t *sysdata;
-
-	message_t **msglist;
-	int messages;
-
+	message_t *msglist;
 	struct __node_t *next, *prev;
 } node_t ;
 
