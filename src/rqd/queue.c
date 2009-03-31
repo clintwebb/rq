@@ -210,6 +210,9 @@ void queue_cancel_node(node_t *node)
 				if (nq->next) nq->next->prev = nq->prev;
 				if (nq->prev) nq->prev->next = nq->next;
 
+				assert(nq->node->refcount > 0);
+				nq->node->refcount --;
+
 				free(nq);
 				nq = NULL;
 				found++;
@@ -232,6 +235,9 @@ void queue_cancel_node(node_t *node)
 				if (nq == queue->ready_tail) queue->ready_tail = nq->prev;
 				if (nq->next) nq->next->prev = nq->prev;
 				if (nq->prev) nq->prev->next = nq->next;
+				
+				assert(nq->node->refcount > 0);
+				nq->node->refcount --;
 
 				free(nq);
 				nq = NULL;
@@ -286,6 +292,9 @@ void queue_cancel_node(node_t *node)
 				if (nq == queue->waitinglist) queue->waitinglist = nq->next;
 				if (nq->next) nq->next->prev = nq->prev;
 				if (nq->prev) nq->prev->next = nq->next;
+
+				assert(nq->node->refcount > 0);
+				nq->node->refcount --;
 
 				free(nq);
 				nq = NULL;

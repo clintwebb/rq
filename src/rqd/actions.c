@@ -59,10 +59,11 @@ void ah_server_shutdown(action_t *action)
 		while (node) {
 			
 			assert(node->handle > 0);
-			
+
 			// fire action_node_shutdown events for each node.
 			fire = action_pool_new(sysdata->actpool);
-			action_set(fire, 250, ah_node_shutdown, node);
+			action_set(fire, 0, ah_node_shutdown, node);
+			node->refcount ++;
 			fire = NULL;
 
 			if (verbose)
@@ -135,6 +136,7 @@ void ah_server_shutdown(action_t *action)
 void ah_node_shutdown(action_t *action)
 {
 	system_data_t *sysdata;
+	server_t *server;
 	node_t *node;
 
 	assert(action != NULL);
@@ -144,25 +146,81 @@ void ah_node_shutdown(action_t *action)
 	sysdata = action->shared;
 	node = action->data;
 
-
-	if (BIT_TEST(node->flags, FLAG_NODE_CLOSING) == 0) {
-		
-		// if this is the first time for the node, we need to look at all the
-		// messages it is servicing and we need to put a timeout on it.
-		if(node->msglist) {
-			assert(0);
-		}
-
-		// if the node is consuming any queues, we need to cancel them (internally)
+	// if the node is consuming any queues, we need to cancel them (internally)
+	if (BIT_TEST(node->flags, FLAG_NODE_NOQUEUES) == 0) {
 		queue_cancel_node(node);
+		BIT_SET(node->flags, FLAG_NODE_NOQUEUES);
+	}
 
-		// send out a message to the node telling them that the server is going offline.
+	// if the node is still connected, then we will attempt to first tell it that
+	// we are closing the node.  If the node closed the connection first, then we
+	// wont have a chance to do this.
+	if (node->handle != INVALID_HANDLE && BIT_TEST(node->flags, FLAG_NODE_CLOSING) == 0) {
 		sendClosing(node);
 		BIT_SET(node->flags, FLAG_NODE_CLOSING);
 	}
 
-	if (node->msglist == NULL) { action_pool_return(action); }
-	else { action_reset(action); }
+	// We are still connected to the node, so we need to put a timeout on the
+	// messages the node is servicing.
+	if (node->handle != INVALID_HANDLE && node->msglist) {
+
+		// need to set a timeout on the messages.
+		assert(0);
+		
+		// we still have stuff to do for this node, so we will reset the action to try again.
+		action_timeout(action, 100);
+		action_reset(action);
+	}
+	else {
+
+		// we are not connected to the node anymore, so we cannot service the
+		// messages that we were waiting for, so we need to return replies on
+		// undelivery to the source nodes.
+		if (node->handle == INVALID_HANDLE && node->msglist) {
+			
+			// send undelivered notices to the owners of all the pending messages
+			// or return the message to the queue.
+			assert(0);
+		}
+
+		// if we have done all we need to do, but still have a valid handle, then we should close it, and delete the event.
+		if (node->handle != INVALID_HANDLE && node->out->length == 0) {
+			assert(node->out->length == 0);
+			assert(node->msglist == NULL);
+			assert(node->handle > 0);
+			close(node->handle);
+			node->handle = INVALID_HANDLE;
+
+			assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE));
+			assert(node->event.ev_base != NULL);
+			event_del(&node->event);
+			BIT_SET(node->flags, FLAG_NODE_ACTIVE);
+
+			node->refcount --;
+
+			// remove the node from the server object.
+			server = sysdata->server;
+			assert(server);
+			assert(server->nodelist);
+			if (server->nodelist == node) server->nodelist = node->next;
+			if (node->next) node->next->prev = node->prev;
+			if (node->prev) node->prev->next = node->next;
+			node->prev = NULL;
+			node->next = NULL;
+			
+			// free the resources used by the node.
+			node_free(node);
+			free(node);
+	
+			// we are done, so we dont need the action any more.
+			action_pool_return(action);
+		}
+		else {
+			// we have outgoing data that we are waiting to deliver... so continue to wait.
+			action_timeout(action, 100);
+			action_reset(action);
+		}
+	}
 }
 
 

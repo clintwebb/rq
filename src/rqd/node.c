@@ -35,10 +35,10 @@ void node_init(node_t *node, system_data_t *sysdata)
 	assert(sysdata->bufpool != NULL);
 	
   assert(DEFAULT_BUFFSIZE > 0);
-  node->in = expbuf_pool_new(sysdata->bufpool, DEFAULT_BUFFSIZE);
-	node->waiting = NULL;
-	node->out = NULL;
-	node->build = NULL;
+  node->in      = expbuf_pool_new(sysdata->bufpool, DEFAULT_BUFFSIZE);
+	node->waiting = expbuf_pool_new(sysdata->bufpool, DEFAULT_BUFFSIZE);
+	node->out     = expbuf_pool_new(sysdata->bufpool, DEFAULT_BUFFSIZE);
+	node->build   = expbuf_pool_new(sysdata->bufpool, 16);
 
 	node->msglist = NULL;
 
@@ -48,6 +48,7 @@ void node_init(node_t *node, system_data_t *sysdata)
 	data_init(&node->data);
 	
 	node->flags = 0;
+	node->refcount = 0;
 	
 	assert(node->handle == INVALID_HANDLE);
 	memset(&node->event, 0, sizeof(node->event));
@@ -70,6 +71,7 @@ void node_free(node_t *node)
 	sysdata = node->sysdata;
 	
 	assert(sysdata->bufpool != NULL);
+	assert(node->refcount == 0);
 	
 	if (BIT_TEST(node->flags, FLAG_NODE_ACTIVE)) {
 		assert(node->event.ev_base != NULL);
@@ -81,26 +83,26 @@ void node_free(node_t *node)
 	assert(node->handle == INVALID_HANDLE);
 	memset(&node->event, 0, sizeof(node->event));
 
-	if (node->in != NULL) {
-		assert(node->in->length == 0);
-		expbuf_pool_return(sysdata->bufpool, node->in);
-		node->in = NULL;
-	}
-	if (node->out != NULL) {
-		expbuf_clear(node->out);
-		expbuf_pool_return(sysdata->bufpool, node->out);
-		node->out = NULL;
-	}
-	if (node->waiting != NULL) {
-		expbuf_clear(node->waiting);
-		expbuf_pool_return(sysdata->bufpool, node->waiting);
-		node->waiting = NULL;
-	}
-	if (node->build != NULL) {
-		assert(node->build->length == 0);
-		expbuf_pool_return(sysdata->bufpool, node->build);
-		node->build = NULL;
-	}
+	// delete the expanding buffers.
+	assert(node->in);
+	assert(node->in->length == 0);
+	expbuf_pool_return(sysdata->bufpool, node->in);
+	node->in = NULL;
+	
+	assert(node->out);
+	expbuf_clear(node->out);
+	expbuf_pool_return(sysdata->bufpool, node->out);
+	node->out = NULL;
+	
+	assert(node->waiting);
+	expbuf_clear(node->waiting);
+	expbuf_pool_return(sysdata->bufpool, node->waiting);
+	node->waiting = NULL;
+
+	assert(node->build);
+	assert(node->build->length == 0);
+	expbuf_pool_return(sysdata->bufpool, node->build);
+	node->build = NULL;
 
 	// make sure that all the messages for this node have been processed first.
 	// And then free the memory that was used for the list.
@@ -131,9 +133,12 @@ static void node_closed(node_t *node)
 	assert(node != NULL);
 	assert(node->sysdata != NULL);
 
+	// we've definately lost connection to the node, so we need to mark it by
+	// clearing the handle.
+	node->handle = INVALID_HANDLE;
+
 	// we need to remove the consume on the queues.
-	if (node->sysdata->queues)
-		queue_cancel_node(node);
+	if (node->sysdata->queues) queue_cancel_node(node);
 
 	// we need to remove (return) any messages that this node was processing.
 	msg = node->msglist;
@@ -158,8 +163,13 @@ static void node_closed(node_t *node)
 		event_del(&node->event);
 		BIT_CLEAR(node->flags, FLAG_NODE_ACTIVE);
 	}
-	
-	node->handle = INVALID_HANDLE;
+
+	// setup an action to free the node.
+	assert(node->sysdata->actpool);
+	action = action_pool_new(node->sysdata->actpool);
+	action_set(action, 0, ah_node_shutdown, node);
+	node->refcount ++;
+	action = NULL;
 }
 
 
@@ -197,7 +207,7 @@ static void node_read(node_t *node)
 			stats->in_bytes += res;
 			node->in->length = res;
 
-			if (node->sysdata->verbose) printf("node(%d) - data received (%d)\n", node->handle, res);
+			if (node->sysdata->verbose > 1) printf("node(%d) - data received (%d)\n", node->handle, res);
 
 			// if we pulled out the max we had avail in our buffer, that means we can pull out more at a time.
 			if (res == node->in->max) {
@@ -205,11 +215,11 @@ static void node_read(node_t *node)
 				assert(empty == 0);
 			}
 			else { empty = 1; }
-			
-			if (node->waiting != NULL && node->waiting->length > 0) {
+
+			assert(node->waiting);
+			if (node->waiting->length > 0) {
 				// we have data left in the in-buffer, so we add the content of the node->in buffer
 				assert(node->in->length > 0);
-				assert(node->waiting != NULL);
 				expbuf_add(node->waiting, node->in->data, node->in->length);
 				expbuf_clear(node->in);
 				assert(node->in->length == 0);
@@ -231,11 +241,7 @@ static void node_read(node_t *node)
 
 				// if there is data left over, then we need to add it to our in-buffer.
 				if (node->in->length > 0) {
-					if (node->waiting == NULL) {
-						assert(node->sysdata->bufpool != NULL);
-						node->waiting = expbuf_pool_new(node->sysdata->bufpool, node->in->length);
-					}
-					assert(node->waiting != NULL);
+					assert(node->waiting);
 					expbuf_add(node->waiting, node->in->data, node->in->length);
 					expbuf_clear(node->in);
 				}
@@ -250,8 +256,6 @@ static void node_read(node_t *node)
 					printf("Node[%d] closed while reading.\n", node->handle);
 				node_closed(node);
 				assert(empty != 0);
-				if (node->sysdata->verbose)
-					printf("Finished clearing node.\n");
 			}
 			else {
 				assert(res == -1);
@@ -274,25 +278,25 @@ static void node_read(node_t *node)
 // couldn't be sent before by node_write_now()).  It will try and send
 // everything in one go, and if it succeeds, then it will clear the 'write'
 // event.
-void node_write(node_t *node)
+static void node_write(node_t *node)
 {
 	stats_t *stats;
 	int res;
 	
-	
-	assert(node != NULL);
-	assert(node->sysdata != NULL);
+	assert(node);
+	assert(node->sysdata);
 
 	stats = node->sysdata->stats;
-	assert(stats != NULL);
+	assert(stats);
 
 	// we've requested the event, so we should have data to process.
-	assert(node->out != NULL);
+	assert(node->out);
 	assert(node->out->length > 0);
 	assert(node->out->length <= node->out->max);
-	assert(node->out->data != NULL);
+	assert(node->out->data);
 	assert(node->handle > 0);
 	assert(node->handle != INVALID_HANDLE);
+	assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE));
 
 	res = send(node->handle, node->out->data, node->out->length, 0);
 	if (res > 0) {
@@ -300,10 +304,21 @@ void node_write(node_t *node)
 		assert(res <= node->out->length);
 		stats->out_bytes += res;
 		expbuf_purge(node->out, res);
+
+		// if we have sent everything, then we dont need to wait for a WRITE event
+		// anymore, so we need to re-establish the events with only the READ flag.
+		assert(node->out != NULL);
+		if (node->out->length == 0) {
+			if (event_del(&node->event) != -1) {
+				assert(node->handle != INVALID_HANDLE && node->handle > 0);
+				event_set(&node->event, node->handle, EV_READ | EV_PERSIST, node_event_handler, (void *)node);
+				event_base_set(node->event.ev_base, &node->event);
+				event_add(&node->event, 0);
+			}
+		}
 	}
 	else if (res == 0) {
 		printf("Node[%d] closed while writing.\n", node->handle);
-		node->handle = INVALID_HANDLE;
 		node_closed(node);
 		assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE) == 0);
 	}
@@ -312,21 +327,8 @@ void node_write(node_t *node)
 		if (errno != EAGAIN && errno != EWOULDBLOCK) {
 			printf("Node[%d] closed while writing - because of error: %d\n", node->handle, errno);
 			close(node->handle);
-			node->handle = INVALID_HANDLE;
 			node_closed(node);
 			assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE) == 0);
-		}
-	}
-		
-	// if we have sent everything, then we dont need to wait for a WRITE event
-	// anymore, so we need to re-establish the events with only the READ flag.
-	assert(node->out != NULL);
-	if (BIT_TEST(node->flags, FLAG_NODE_ACTIVE) && node->out->length == 0) {
-		if (event_del(&node->event) != -1) {
-			assert(node->handle != INVALID_HANDLE && node->handle > 0);
-			event_set(&node->event, node->handle, EV_READ | EV_PERSIST, node_event_handler, (void *)node);
-			event_base_set(node->event.ev_base, &node->event);
-			event_add(&node->event, 0);
 		}
 	}
 }
@@ -342,20 +344,21 @@ void node_write_now(node_t *node, int length, char *data)
 	stats_t *stats;
 	int res;
 	
-	assert(node != NULL);
+	assert(node);
 	assert(length > 0);
-	assert(data != NULL);
+	assert(data);
 
 	assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE));
-	assert(node->sysdata != NULL);
-	assert(node->sysdata->stats != NULL);
-
+	assert(node->sysdata);
+	assert(node->sysdata->stats);
+	assert(node->sysdata->bufpool);
+	
 	stats = node->sysdata->stats;
 
-	if (node->out != NULL && node->out->length > 0) {
+	assert(node->out);
+	if (node->out && node->out->length > 0) {
 		// we already have data in the outbuffer, so we will add this new data to
 		// it, and wait for the event to fire.
-
 		expbuf_add(node->out, data, length);
 	}
 	else {
@@ -369,11 +372,17 @@ void node_write_now(node_t *node, int length, char *data)
 			stats->out_bytes += res;
 			if (res < length) {
 				// not everything was sent, so we need to put the remainder in the 'out' queue.
-				assert(node->sysdata->bufpool != NULL);
-				if (node->out == NULL)
-					node->out = expbuf_pool_new(node->sysdata->bufpool, length-res);
-				assert(node->out != NULL);
 				expbuf_add(node->out, &data[res], length-res);
+				assert(node->out->length > 0);
+			
+				// we have ended up with data in the out-buffer, so we need to set the
+				// event so that we can be notified when it is safe to send more.
+				if (event_del(&node->event) != -1) {
+					assert(node->handle > 0);
+					event_set(&node->event, node->handle, EV_WRITE | EV_READ | EV_PERSIST, node_event_handler, (void *)node);
+					event_base_set(node->event.ev_base, &node->event);
+					event_add(&node->event, 0);
+				}
 			}
 		}
 		else if (res == 0) {
@@ -392,17 +401,6 @@ void node_write_now(node_t *node, int length, char *data)
 				node->handle = INVALID_HANDLE;
 				node_closed(node);
 				assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE) == 0);
-			}
-		}
-			
-		// if we have ended up with data in the out-buffer, then we need to set
-		// the event so that we can be notified when it is safe to send more.
-		if (BIT_TEST(node->flags, FLAG_NODE_ACTIVE) && node->out != NULL && node->out->length == 0) {
-			if (event_del(&node->event) != -1) {
-				assert(node->handle > 0);
-				event_set(&node->event, node->handle, EV_WRITE | EV_READ | EV_PERSIST, node_event_handler, (void *)node);
-				event_base_set(node->event.ev_base, &node->event);
-				event_add(&node->event, 0);
 			}
 		}
 	}

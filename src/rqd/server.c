@@ -304,6 +304,7 @@ void server_event_handler(int hid, short flags, void *data)
 		if (server->nodelist) server->nodelist->prev = node;
 		assert(node->prev == NULL);
 		server->nodelist = node;
+		node->refcount ++;
 
 		server->active ++;
 		assert(server->active > 0);

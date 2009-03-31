@@ -14,9 +14,10 @@
 
 #define DEFAULT_BUFFSIZE 1024
 
-#define FLAG_NODE_ACTIVE			0x01
-#define FLAG_NODE_CLOSING 		0x02
-#define FLAG_NODE_CONTROLLER	0x04
+#define FLAG_NODE_ACTIVE			1
+#define FLAG_NODE_CLOSING 		2
+#define FLAG_NODE_CONTROLLER	4
+#define FLAG_NODE_NOQUEUES    8
 
 typedef struct __node_t {
 	int handle;
@@ -26,6 +27,7 @@ typedef struct __node_t {
 	data_t data;
 	system_data_t *sysdata;
 	message_t *msglist;
+	int refcount;
 	struct __node_t *next, *prev;
 } node_t ;
 

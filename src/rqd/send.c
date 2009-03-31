@@ -15,25 +15,15 @@ void sendConsumeReply(node_t *node, char *queue, int qid)
 	assert(node != NULL);
 	assert(queue != NULL);
 	assert(qid > 0 && qid <= 0xffff);
-
-	// if we dont yet have a 'build' buffer then we will get one.
-	if (node->build == NULL) {
-		assert(node->sysdata != NULL);
-		assert(node->sysdata->bufpool != NULL);
-		node->build = expbuf_pool_new(node->sysdata->bufpool, 64);
-	}
-	assert(node->build != NULL);
+	assert(node->build);
+	assert(node->build->length == 0);
 
 	// add the commands to the out queue.
-	assert(node->build->length == 0);
 	addCmd(node->build, RQ_CMD_CLEAR);
 	addCmdInt(node->build, RQ_CMD_QUEUEID, qid);
 	addCmdShortStr(node->build, RQ_CMD_QUEUE, strlen(queue), queue);
 	addCmd(node->build, RQ_CMD_EXECUTE);
 
-	assert(node->build->length > 0);
-	assert(node->build->length <= node->build->max);
-	assert(node->build->data != NULL);
 	node_write_now(node, node->build->length, node->build->data);
 	expbuf_clear(node->build);
 }
@@ -46,16 +36,9 @@ void sendMessage(node_t *node, message_t *msg)
 	
 	assert(node != NULL);
 	assert(msg != NULL);
-
 	assert(node->sysdata == msg->sysdata);
-
-	// if we dont yet have a 'build' buffer then we will get one.
-	if (node->build == NULL) {
-		assert(node->sysdata != NULL);
-		assert(node->sysdata->bufpool != NULL);
-		node->build = expbuf_pool_new(node->sysdata->bufpool, 64);
-	}
 	assert(node->build != NULL);
+	assert(node->build->length == 0);
 
 	assert(msg->data);
 	assert(msg->source_node);
@@ -72,15 +55,11 @@ void sendMessage(node_t *node, message_t *msg)
 	}
 
 	// add the commands to the out queue.
-	assert(node->build->length == 0);
 	addCmd(node->build, RQ_CMD_CLEAR);
 	addCmdInt(node->build, RQ_CMD_QUEUEID, q->qid);
 	addCmdLargeStr(node->build, RQ_CMD_PAYLOAD, msg->data->length, msg->data->data);
 	addCmd(node->build, RQ_CMD_EXECUTE);
 
-	assert(node->build->length > 0);
-	assert(node->build->length <= node->build->max);
-	assert(node->build->data != NULL);
 	node_write_now(node, node->build->length, node->build->data);
 	expbuf_clear(node->build);
 }
@@ -91,14 +70,7 @@ void sendUndelivered(node_t *node, message_t *msg)
 {
 	assert(node != NULL);
 	assert(msg != NULL);
-
-	// if we dont yet have a 'build' buffer then we will get one.
-	if (node->build == NULL) {
-		assert(node->sysdata != NULL);
-		assert(node->sysdata->bufpool != NULL);
-		node->build = expbuf_pool_new(node->sysdata->bufpool, 8);
-	}
-	assert(node->build != NULL);
+	assert(node->build);
 	assert(node->build->length == 0);
 
 	// add the commands to the out queue.
@@ -121,17 +93,10 @@ void sendUndelivered(node_t *node, message_t *msg)
 void sendClosing(node_t *node)
 {
 	assert(node != NULL);
-
-	// if we dont yet have a 'build' buffer then we will get one.
-	if (node->build == NULL) {
-		assert(node->sysdata != NULL);
-		assert(node->sysdata->bufpool != NULL);
-		node->build = expbuf_pool_new(node->sysdata->bufpool, 16);
-	}
-	assert(node->build != NULL);
+	assert(node->build);
+	assert(node->build->length == 0);
 
 	// add the commands to the out queue.
-	assert(node->build->length == 0);
 	addCmd(node->build, RQ_CMD_CLEAR);
 	addCmd(node->build, RQ_CMD_CLOSING);
 	addCmd(node->build, RQ_CMD_EXECUTE);
