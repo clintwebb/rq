@@ -17,6 +17,7 @@ void message_init(message_t *msg, system_data_t *sysdata)
 	msg->id = 0;
 	msg->flags = 0;
 	msg->data = NULL;
+	msg->source_id = 0;
 	msg->source_node = NULL;
 	msg->target_node = NULL;
 	msg->queue = NULL;
@@ -55,6 +56,19 @@ void message_set_orignode(message_t *msg, void *node)
 	assert(msg->source_node == NULL);
 	msg->source_node = node;
 }
+
+
+//-----------------------------------------------------------------------------
+// Set the original msg ID for the message, that we will need when we return
+// anuy data to the node.
+void message_set_origid(message_t *msg, message_id_t id)
+{
+	assert(msg != NULL);
+	assert(id > 0);
+	assert(msg->source_id == 0);
+	msg->source_id = id;
+}
+
 
 //-----------------------------------------------------------------------------
 // Set the flag that indicates that the message is a broadcast message (to be

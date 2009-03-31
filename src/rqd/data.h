@@ -32,7 +32,7 @@
 
 
 typedef struct {
-	short int id;
+	int id;
 	short int timeout;
 	short int max;
 	short int priority;

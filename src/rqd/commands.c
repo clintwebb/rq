@@ -258,7 +258,7 @@ void cmdId(void *base, risp_int_t value)
 {
 	node_t *node= (node_t *) base;
  	assert(node != NULL);
- 	assert(value > 0 && value <= 0xffff);
+ 	assert(value > 0);
 	node->data.id = value;
 	node->data.mask |= (DATA_MASK_ID);
 	

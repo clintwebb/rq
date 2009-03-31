@@ -44,15 +44,11 @@ void processRequest(node_t *node)
 		message_set_orignode(msg, node);
 	
 		// if a messageid has been supplied, use that for the node_side.
-		assert(0);
+		if (BIT_TEST(node->data.mask, DATA_MASK_ID)) {
+			message_set_origid(msg, node->data.id);
+		}
 		
-		// find the queue object.
-		// do we have a queue name, or a qid?
-
-		// assert: test code... was pasted in, but hasn't been checked.
-		assert(0);
-
-		
+		// find the q object for this queue.
 		qname = NULL;
 		qid = 0;
 		if (BIT_TEST(node->data.mask, DATA_MASK_QUEUE)) {
@@ -66,7 +62,7 @@ void processRequest(node_t *node)
 		assert(qid > 0 || qname);
 	
 		if (q == NULL) {
-			// we dont have a queue.
+			// we dont have a queue, so we will need to create one.
 			assert(qid == 0);
 	
 			q = (queue_t *) malloc(sizeof(queue_t));
@@ -89,16 +85,12 @@ void processRequest(node_t *node)
 		
 		// add the message to the queue.
 		queue_addmsg(q, msg);
-	
-		// create an action to process the messages on the queue (if action not already pending).
-		assert(0);
 	}
 	else {
 		// required data was not found.
 		// need to return some sort of error
 		assert(0);
 	}
-	assert(0);
 }
 
 void processReply(node_t *node)

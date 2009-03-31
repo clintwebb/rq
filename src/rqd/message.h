@@ -13,15 +13,19 @@
 #define FLAG_MSG_NOREPLY		0x02
 #define FLAG_MSG_KEEP				0x04
 
+typedef int message_id_t;
+
 typedef struct __message_t {
-	unsigned int id;
-	unsigned int flags;	
-	expbuf_t *data;
-	void *source_node;
-	void *target_node;
-	void *queue;
-	struct __message_t *next, *prev;
+	message_id_t   id;
+	unsigned int   flags;	
+	expbuf_t      *data;
+	message_id_t   source_id;
+	void          *source_node;
+	void          *target_node;
+	void          *queue;
 	system_data_t *sysdata;
+	
+	struct __message_t *next, *prev;
 } message_t;
 
 
@@ -30,6 +34,7 @@ void message_init(message_t *msg, system_data_t *sysdata);
 void message_free(message_t *msg);
 
 void message_set_orignode(message_t *msg, void *node);
+void message_set_origid(message_t *msg, message_id_t id);
 void message_set_broadcast(message_t *msg);
 void message_set_noreply(message_t *msg);
 void message_set_queue(message_t *msg, void *queue);
