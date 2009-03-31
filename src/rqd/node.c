@@ -135,6 +135,7 @@ static void node_closed(node_t *node)
 
 	// we've definately lost connection to the node, so we need to mark it by
 	// clearing the handle.
+	assert(node->handle != INVALID_HANDLE);
 	node->handle = INVALID_HANDLE;
 
 	// we need to remove the consume on the queues.

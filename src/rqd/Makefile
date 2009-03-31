@@ -49,7 +49,7 @@ node.o: node.c $(H_node) $(H_data) $(H_stats) $(H_queue) $(H_actions)
 process.o: process.c $(H_process) $(H_send) $(H_queue) $(H_message) $(H_actions)
 	gcc -c -o $@ process.c $(ARGS)
 
-queue.o: queue.c $(H_queue) $(H_server) $(H_actions)
+queue.o: queue.c $(H_queue) $(H_server) $(H_actions) $(H_send)
 	gcc -c -o $@ queue.c $(ARGS)
 
 rqd.o: rqd.c daemon.h $(H_actions) $(H_commands) $(H_server) $(H_settings) $(H_system_data)

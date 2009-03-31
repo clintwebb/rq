@@ -2,6 +2,7 @@
 
 #include "actions.h"
 #include "queue.h"
+#include "send.h"
 #include "server.h"
 
 #include <assert.h>
@@ -252,7 +253,7 @@ void queue_cancel_node(node_t *node)
 			// The node was found already.  If the queue was in exclusive mode, need
 			// to update the lists and activate the one that is waiting.
 
-			if (BIT_TEST(queue->flags, QUEUE_FLAG_EXCLUSIVE)) {
+			if (BIT_TEST(queue->flags, QUEUE_FLAG_EXCLUSIVE) || (queue->ready_head == NULL && queue->busy == NULL && queue->waitinglist != NULL)) {
 				// queue was already in exclusive mode, and we have removed a node, so that means our main lists should be empty.
 				assert(queue->ready_head == NULL);
 				assert(queue->ready_tail == NULL);
@@ -269,6 +270,11 @@ void queue_cancel_node(node_t *node)
 					queue->waitinglist = nq->next;
 					nq->next = NULL;
 
+					assert(nq->node);
+					assert(queue->name);
+					assert(queue->qid > 0);
+					sendConsumeReply(nq->node, queue->name, queue->qid);
+
 					if (queue->msghead) {
 						// there are messages that need to be delivered.  Not sure yet, whether to assign an action to do this, or what...
 						assert(0);
@@ -278,6 +284,7 @@ void queue_cancel_node(node_t *node)
 						printf("Promoting waiting node:%d to EXCLUSIVE queue '%s'.\n", nq->node->handle, queue->name);
 				}
 			}
+			
 		}
 		
 		// and waiting list.
