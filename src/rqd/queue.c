@@ -154,7 +154,7 @@ void queue_addmsg(queue_t *queue, message_t *msg)
 	if (queue->msghead == queue->msgtail) {
 		assert(queue->sysdata->actpool);
 		action = action_pool_new(queue->sysdata->actpool);
-		action_set(action, 0, ah_queue_deliver, q);
+		action_set(action, 0, ah_queue_deliver, queue);
 		action = NULL;
 	}
 }

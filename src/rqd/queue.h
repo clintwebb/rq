@@ -25,7 +25,7 @@ typedef struct __node_queue_t {
 
 
 typedef struct __queue_msg_t {
-	message_t msg;
+	message_t *msg;
 	struct __queue_msg_t *next, *prev;
 } queue_msg_t;
 

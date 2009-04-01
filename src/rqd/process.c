@@ -46,6 +46,10 @@ void processRequest(node_t *node)
 		if (BIT_TEST(node->data.mask, DATA_MASK_ID)) {
 			message_set_origid(msg, node->data.id);
 		}
+
+		if (BIT_TEST(node->data.mask, DATA_MASK_TIMEOUT)) {
+			message_set_timeout(msg, node->data.timeout);
+		}
 		
 		// find the q object for this queue.
 		qname = NULL;

@@ -16,7 +16,7 @@ typedef int message_id_t;
 
 typedef struct __message_t {
 	message_id_t   id;
-	unsigned int   flags;	
+	unsigned int   flags;
 	expbuf_t      *data;
 	message_id_t   source_id;
 	void          *source_node;

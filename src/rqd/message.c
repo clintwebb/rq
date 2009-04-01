@@ -102,9 +102,20 @@ void message_set_queue(message_t *msg, void *queue)
 // If the message has a timeout, we need to know.
 void message_set_timeout(message_t *msg, int seconds)
 {
+	action_t *action;
 	assert(msg);
 	assert(seconds >= 0);
 
-	assert(0);
+	// set the timeout value into the message structure.
+	assert(msg->timeout == 0);
+	assert(BIT_TEST(msg->flags, FLAG_MSG_TIMEOUT));
+	msg->timeout = seconds;
+	BIT_SET(msg->flags, FLAG_MSG_TIMEOUT);
+
+	// create an action to monitor and update the countdown.
+	assert(msg->sysdata->actpool);
+	action = action_pool_new(msg->sysdata->actpool);
+	action_set(action, 0, ah_msg_countdown, msg);
+	action = NULL;
 }
 

@@ -404,6 +404,10 @@ void ah_queue_deliver(action_t *action)
 	assert(q && sysdata);
 
 	assert(q->msghead && q->msgtail);
+	assert(q->msghead->msg);
+	assert(q->msghead->prev == NULL);
+
+	msg = q->msghead->msg;
 
 	// check the message to see if it is broadcast.
 	if (BIT_TEST(msg->flags, FLAG_MSG_BROADCAST)) {
@@ -414,14 +418,14 @@ void ah_queue_deliver(action_t *action)
 
 		// for each node in the list, we need to examine to assign the message to it.
 		assert(0);
+
+		// if we have at least one node that is not busy, then we will send the message.
+		assert(0);
 		
 	}
 	else {
 		// This is a request.
 
-		// if the message has a timeout, then we need to set a timeout action.
-		assert(0);
-	
 		// add the message to the queue msglist.
 		assert(0);
 
@@ -435,3 +439,15 @@ void ah_queue_deliver(action_t *action)
 
 	assert(0);
 }
+
+
+//-----------------------------------------------------------------------------
+// This action is created when a message is provided that has a timeout.  This
+// event will fire every second, decrementing the counter of the message.  If
+// the countdown gets to 0, then it will initiate a 'return' of the failed
+// message.
+void ah_msg_countdown(action_t *action)
+{
+}
+
+

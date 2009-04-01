@@ -8,6 +8,7 @@ void ah_node_shutdown(action_t *action);
 void ah_queue_shutdown(action_t *action);
 void ah_stats(action_t *action);
 void ah_message(action_t *action);
+void ah_msg_countdown(action_t *action);
 void ah_queue_notify(action_t *action);
 void ah_queue_deliver(action_t *action);
 
