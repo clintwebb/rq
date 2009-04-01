@@ -59,6 +59,8 @@ typedef struct __queue_t {
 
 	// The pointers for the linked list of queues.
 	struct __queue_t *next, *prev;
+
+	system_data_t *sysdata;
 } queue_t;
 
 

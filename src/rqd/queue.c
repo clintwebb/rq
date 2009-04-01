@@ -30,6 +30,7 @@ void queue_init(queue_t *queue)
 	queue->ready_tail = NULL;
 	
 	queue->waitinglist = NULL;
+	queue->sysdata = NULL;
 }
 
 
@@ -372,6 +373,8 @@ queue_t * queue_create(system_data_t *sysdata, char *qname)
 		q->next->prev = q;
 	}
 	sysdata->queues = q;
+
+	q->sysdata = sysdata;
 
 	// set an action so that we can notify other nodes (controllers) that we are consuming a queue.
 	assert(sysdata->actpool);
