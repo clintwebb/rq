@@ -448,6 +448,9 @@ void ah_queue_deliver(action_t *action)
 // message.
 void ah_msg_countdown(action_t *action)
 {
+	assert(action);
+
+	assert(0);
 }
 
 
