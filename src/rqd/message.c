@@ -16,6 +16,7 @@ void message_init(message_t *msg, system_data_t *sysdata)
 	
 	msg->id = 0;
 	msg->flags = 0;
+	msg->timeout = 0;
 	msg->data = NULL;
 	msg->source_id = 0;
 	msg->source_node = NULL;

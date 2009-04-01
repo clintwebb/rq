@@ -12,12 +12,14 @@
 #define FLAG_MSG_BROADCAST	0x01
 #define FLAG_MSG_NOREPLY		0x02
 #define FLAG_MSG_KEEP				0x04
+#define FLAG_MSG_TIMEOUT    0x08
 
 typedef int message_id_t;
 
 typedef struct __message_t {
 	message_id_t   id;
-	unsigned int   flags;	
+	unsigned int   flags;
+	int            timeout;
 	expbuf_t      *data;
 	message_id_t   source_id;
 	void          *source_node;
