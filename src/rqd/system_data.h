@@ -9,10 +9,11 @@
 
 typedef struct {
 	struct event_base *evbase;
-	expbuf_pool_t *bufpool;
 	risp_t *risp;
+	expbuf_pool_t *bufpool;
 	action_pool_t *actpool;
 	mempool_t *msgpool;
+	mempool_t *qmpool;
 	
 	int verbose;
 	void *settings;

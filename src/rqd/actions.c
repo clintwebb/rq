@@ -391,4 +391,47 @@ void ah_queue_notify(action_t *action)
 	action_pool_return(action);
 }
 
+// When a message is added to the queue, 
+void ah_queue_deliver(action_t *action)
+{
+	system_data_t *sysdata;
+	queue_t *q;
+	message_t *msg;
+		
+	assert(action);
+	q = action->data;
+	sysdata = action->shared;
+	assert(q && sysdata);
 
+	assert(q->msghead && q->msgtail);
+
+	// check the message to see if it is broadcast.
+	if (BIT_TEST(msg->flags, FLAG_MSG_BROADCAST)) {
+		assert(BIT_TEST(msg->flags, FLAG_MSG_NOREPLY));
+
+		// This is a broadcast message.
+		assert(0);
+
+		// for each node in the list, we need to examine to assign the message to it.
+		assert(0);
+		
+	}
+	else {
+		// This is a request.
+
+		// if the message has a timeout, then we need to set a timeout action.
+		assert(0);
+	
+		// add the message to the queue msglist.
+		assert(0);
+
+		// if the msglist was previously empty, then create an action to process the message queue list.
+	
+
+
+
+		
+	}
+
+	assert(0);
+}

@@ -177,7 +177,6 @@ int main(int argc, char **argv)
 	expbuf_pool_t  *bufpool  = NULL;
 	action_pool_t  *actpool  = NULL;
 	action_t       *action   = NULL;
-	mempool_t      *msgpool  = NULL;
 
 	system_data_t   sysdata;
 	int i;
@@ -197,6 +196,7 @@ int main(int argc, char **argv)
 	sysdata.risp      = NULL;
 	sysdata.queues    = NULL;
 	sysdata.msgpool   = NULL;
+	sysdata.qmpool    = NULL;
 
 
 	// handle SIGINT 
@@ -335,9 +335,13 @@ int main(int argc, char **argv)
 	}
 
 	// Create the message pool.
-	msgpool = (mempool_t *) malloc(sizeof(mempool_t));
-	mempool_init(msgpool);
-	sysdata.msgpool = msgpool;
+	sysdata.msgpool = (mempool_t *) malloc(sizeof(mempool_t));
+	mempool_init(sysdata.msgpool);
+
+	// Create the qm pool.
+	sysdata.qmpool = (mempool_t *) malloc(sizeof(mempool_t));
+	mempool_init(sysdata.qmpool);
+	
 
 	
 ///============================================================================
@@ -369,11 +373,15 @@ int main(int argc, char **argv)
 
 	// Cleanup the message pool.
 	assert(sysdata.msgpool);
-	assert(msgpool == sysdata.msgpool);
-	mempool_free(msgpool);
-	free(msgpool);
-	msgpool = NULL;
+	mempool_free(sysdata.msgpool);
+	free(sysdata.msgpool);
 	sysdata.msgpool = NULL;
+
+	// Cleanup the qm pool.
+	assert(sysdata.qmpool);
+	mempool_free(sysdata.qmpool);
+	free(sysdata.qmpool);
+	sysdata.qmpool = NULL;
 
 	// cleanup 'server', which should cleanup all the 'nodes'
 	server_cleanup(server);

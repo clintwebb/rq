@@ -119,23 +119,43 @@ queue_t * queue_get_name(queue_t *head, const char *qname)
 // the best node to deliver it to, and deliver it.
 void queue_addmsg(queue_t *queue, message_t *msg)
 {
-	assert(queue != NULL);
-	assert(msg != NULL);
+	queue_msg_t *qm;
+	action_t *action;
 
-	// check the message to see if it is broadcast.
-	// and make sure that we have a timeout.
+	assert(queue);
+	assert(msg);
+	assert(queue->sysdata);
+	assert(queue->sysdata->qmpool);
 
-	// check to see if the message is a request.
-	// if it is a broadcast request, then we need to create 
+	// create queue_msg_t object to hold the message.
+	qm = mempool_get(queue->sysdata->qmpool, sizeof(queue_msg_t));
+	if (qm == NULL) {
+		qm = (queue_msg_t *) malloc(sizeof(queue_msg_t));
+		assert(qm);
+		mempool_assign(queue->sysdata->qmpool, qm, sizeof(queue_msg_t));
+	}
 
-// ** Do we need to create a message object for every node that we send the message to?  That could be messy if we have a lot of consumers... or can the nodes share the structure?
+	// assign the message to the qm.
+	qm->msg = msg;
 
-	// for each node in the list, we need to examine to assign the message to it.
+	// add the qm to the bottom of the message list.
+	qm->prev = queue->msghead;
+	qm->next = NULL;
+	if (queue->msghead == NULL) {
+		assert(queue->msgtail == NULL);
+		queue->msghead = qm;
+		queue->msgtail = qm;
+	}
+	assert(queue->msghead);
+	assert(queue->msgtail);
 
-	// ** in trying to conserve memory by using the same structure from the originating node, the receiving nodes, and also in the queues, then we 
-
-
-	assert(0);
+	// if the msglist was previously empty, create the action to process the message on the queue.
+	if (queue->msghead == queue->msgtail) {
+		assert(queue->sysdata->actpool);
+		action = action_pool_new(queue->sysdata->actpool);
+		action_set(action, 0, ah_queue_deliver, q);
+		action = NULL;
+	}
 }
 
 

@@ -11,7 +11,6 @@
 
 #define FLAG_MSG_BROADCAST	0x01
 #define FLAG_MSG_NOREPLY		0x02
-#define FLAG_MSG_KEEP				0x04
 
 typedef int message_id_t;
 

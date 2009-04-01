@@ -21,8 +21,7 @@ void processRequest(node_t *node)
 	char *qname;
 	queue_id_t qid;
 	queue_t *q, *tmp;
-	
-	
+
 	assert(node);
 	assert(node->sysdata);
 	assert(node->sysdata->msgpool);
