@@ -1,4 +1,5 @@
 
+#include "actions.h"
 #include "message.h"
 #include "queue.h"
 
@@ -56,6 +57,9 @@ void message_set_orignode(message_t *msg, void *node)
 	assert(node != NULL);
 	assert(msg->source_node == NULL);
 	msg->source_node = node;
+
+	((node_t *)node)->refcount ++;
+	assert(((node_t *)node)->refcount > 0);
 }
 
 

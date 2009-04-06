@@ -150,6 +150,10 @@ void queue_addmsg(queue_t *queue, message_t *msg)
 	assert(queue->msghead);
 	assert(queue->msgtail);
 
+	// increment the refcount for the message.
+// 	msg->refcount++;
+// 	assert(msg->refcount > 0);
+
 	// if the msglist was previously empty, create the action to process the message on the queue.
 	if (queue->msghead == queue->msgtail) {
 		assert(queue->sysdata->actpool);

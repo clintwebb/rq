@@ -41,9 +41,15 @@ void sendMessage(node_t *node, message_t *msg)
 	assert(node->build->length == 0);
 
 	assert(msg->data);
-	assert(msg->source_node);
 	assert(msg->target_node);
 	assert(msg->queue);
+
+
+/*
+	What is the best way to handle messages that have been sent to a node?   We need to keep track of it at the node level so that we can find it again.   We definately need a refcount on the message.  We should decouple the messages from the linked lists, and have seperate linked lists for source_nodes, queues and target_nodes.  Should we create a linked list library?  
+*/
+
+
 
 	q = msg->queue;
 	assert(q->qid > 0);

@@ -40,7 +40,7 @@ data.o: data.c $(H_data)
 daemon.o: daemon.c daemon.h
 	gcc -c -o $@ daemon.c $(ARGS)
 
-message.o: message.c $(H_message) $(H_queue)
+message.o: message.c $(H_message) $(H_queue) $(H_actions)
 	gcc -c -o $@ message.c $(ARGS)
 
 node.o: node.c $(H_node) $(H_data) $(H_stats) $(H_queue) $(H_actions)

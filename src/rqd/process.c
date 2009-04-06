@@ -18,14 +18,15 @@
 void processRequest(node_t *node)
 {
 	message_t *msg;
-	char *qname;
-	queue_id_t qid;
 	queue_t *q, *tmp;
 
 	assert(node);
 	assert(node->sysdata);
 	assert(node->sysdata->msgpool);
 	assert(node->sysdata->queues);
+
+	// This function should not be called for a Broadcast message.
+	assert(BIT_TEST(node->data.flags, DATA_FLAG_BROADCAST) == 0);
 
 	// make sure we have the required data.
 	if ((BIT_TEST(node->data.mask, DATA_MASK_QUEUE) || BIT_TEST(node->data.mask, DATA_MASK_QUEUEID))
@@ -38,36 +39,58 @@ void processRequest(node_t *node)
 			mempool_assign(node->sysdata->msgpool, msg, sizeof(message_t));
 		}
 		message_init(msg, node->sysdata);
-		
-		// make a note in the msg object, the source node.
-		message_set_orignode(msg, node);
-	
-		// if a messageid has been supplied, use that for the node_side.
-		if (BIT_TEST(node->data.mask, DATA_MASK_ID)) {
-			message_set_origid(msg, node->data.id);
-		}
 
+		// assign the message payload.
+		assert(BIT_TEST(node->data.mask, DATA_MASK_PAYLOAD));
+		assert(node->sysdata->bufpool != NULL);
+		msg->data = expbuf_pool_new(node->sysdata->bufpool, node->data.payload.length);
+		assert(msg->data);
+		expbuf_set(msg->data, node->data.payload.data, node->data.payload.length);
+		
+		// if message is NOREPLY, then we dont need
+		if (BIT_TEST(node->data.flags, DATA_FLAG_NOREPLY)) {
+			BIT_SET(msg->flags, FLAG_MSG_NOREPLY);
+			assert(msg->source_node == NULL);
+			assert(msg->source_id == 0);
+		}
+		else {
+			assert(BIT_TEST(msg->flags, FLAG_MSG_NOREPLY) == 0);
+		
+			// make a note in the msg object, the source node.
+			message_set_orignode(msg, node);
+		
+			// if a messageid has been supplied, use that for the node_side.
+			if (BIT_TEST(node->data.mask, DATA_MASK_ID)) {
+				message_set_origid(msg, node->data.id);
+			}
+
+			// we are expecting a reply, so we will need to add this message to the node's msg list.
+			if (node->msglist) {
+				assert(node->msglist->prev == NULL);
+				node->msglist->prev = msg;
+			}
+			assert(msg->prev == NULL);
+			msg->next = node->msglist;
+			node->msglist = msg;
+		}
+		
 		if (BIT_TEST(node->data.mask, DATA_MASK_TIMEOUT)) {
 			message_set_timeout(msg, node->data.timeout);
 		}
 		
 		// find the q object for this queue.
-		qname = NULL;
-		qid = 0;
 		if (BIT_TEST(node->data.mask, DATA_MASK_QUEUE)) {
-			qname = expbuf_string(&node->data.queue);
-			q = queue_get_name(node->sysdata->queues, qname);
+			q = queue_get_name(node->sysdata->queues, expbuf_string(&node->data.queue));
 		}
 		else if (BIT_TEST(node->data.mask, DATA_MASK_QUEUEID)) {
-			qid = node->data.qid;
-			q = queue_get_id(node->sysdata->queues, qid);
+			q = queue_get_id(node->sysdata->queues, node->data.qid);
 		}
-		assert(qid > 0 || qname);
+		else {
+			assert(0);
+		}
 	
 		if (q == NULL) {
 			// we dont have a queue, so we will need to create one.
-			assert(qid == 0);
-	
 			q = (queue_t *) malloc(sizeof(queue_t));
 			queue_init(q);
 			if (node->sysdata->queues) {
@@ -85,7 +108,7 @@ void processRequest(node_t *node)
 			assert(q->prev == NULL);			
 		}
 		assert(q);
-		
+
 		// add the message to the queue.
 		queue_addmsg(q, msg);
 	}

@@ -317,7 +317,7 @@ void cmdQueue(void *base, risp_length_t length, risp_char_t *data)
  	assert(length > 0);
  	assert(data != NULL);
  	expbuf_set(&node->data.queue, data, length);
- 	node->data.mask |= DATA_MASK_QUEUE;
+ 	BIT_SET(node->data.mask, DATA_MASK_QUEUE);
 	
 	assert(node->sysdata != NULL);
 	assert(node->sysdata->verbose >= 0);
@@ -331,13 +331,18 @@ void cmdPayload(void *base, risp_length_t length, risp_char_t *data)
  	assert(node != NULL);
  	assert(length > 0);
  	assert(data != NULL);
+ 	
  	expbuf_set(&node->data.payload, data, length);
- 	node->data.mask |= DATA_MASK_PAYLOAD;
+ 	BIT_SET(node->data.mask, DATA_MASK_PAYLOAD);
 	
 	assert(node->sysdata != NULL);
 	assert(node->sysdata->verbose >= 0);
 	if (node->sysdata->verbose > 1)
-		printf("node:%d PAYLOAD (len:%d)\n", node->handle, length);
+		printf("node:%d PAYLOAD (len:%d, flags:%x, mask:%x)\n",
+			node->handle,
+			length,
+			node->data.flags,
+			node->data.mask);
 }
 
 

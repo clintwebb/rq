@@ -396,8 +396,11 @@ void ah_queue_deliver(action_t *action)
 {
 	system_data_t *sysdata;
 	queue_t *q;
+	node_queue_t *nq;
 	message_t *msg;
-		
+	queue_msg_t *qm;
+	action_t *delact;
+
 	assert(action);
 	q = action->data;
 	sysdata = action->shared;
@@ -408,36 +411,113 @@ void ah_queue_deliver(action_t *action)
 	assert(q->msghead->prev == NULL);
 
 	msg = q->msghead->msg;
+	assert(msg);
 
 	// check the message to see if it is broadcast.
 	if (BIT_TEST(msg->flags, FLAG_MSG_BROADCAST)) {
-		assert(BIT_TEST(msg->flags, FLAG_MSG_NOREPLY));
+
+		if (sysdata->verbose > 1) printf("ah_queue_deliver: delivering broadcast message\n");
 
 		// This is a broadcast message.
-		assert(0);
-
-		// for each node in the list, we need to examine to assign the message to it.
-		assert(0);
+		assert(BIT_TEST(msg->flags, FLAG_MSG_NOREPLY));
+		assert(msg->next == NULL);
+		assert(msg->prev == NULL);
 
 		// if we have at least one node that is not busy, then we will send the message.
-		assert(0);
-		
+		// even if a node is busy, we will send the broadcast to it.
+		if (q->ready_head) {
+			nq = q->ready_head;
+			while (nq) {
+				assert(nq->node);
+				if (sysdata->verbose > 1) printf("ah_queue_deliver: sending broadcast msg to node:%d\n", nq->node->handle);
+				sendMessage(nq->node, msg);
+			}
+
+			// we have delivered the broadcast msg to all the consuming nodes, so we
+			// will remove the message and set an action to free it.
+			assert(q->msgtail);
+			qm = q->msghead;
+			assert(qm->prev == NULL);
+			if (qm->next) qm->next->prev = NULL;
+			if (q->msghead == q->msgtail) q->msgtail = NULL;
+			q->msghead = qm->next;
+			mempool_return(q->sysdata->qmpool, qm);
+			qm = NULL;
+
+			// since it is broadcast, we are not expecting a reply, so we can delete
+			// the message (it should already be removed from the node).
+			// create action to delete the message.
+			assert(q->sysdata->actpool);
+			delact = action_pool_new(q->sysdata->actpool);
+			assert(msg);
+			action_set(delact, 0, ah_msg_delete, msg);
+			delact = NULL;
+		}
 	}
 	else {
 		// This is a request.
 
-		// add the message to the queue msglist.
-		assert(0);
+		// if we have a node that is ready, use it.
+		if (q->ready_head) {
 
-		// if the msglist was previously empty, then create an action to process the message queue list.
+			nq = q->ready_head;
+
+			assert(nq->waiting <= nq->max);
+			
+			// send the message to the node.
+			if (sysdata->verbose > 1) printf("ah_queue_deliver: sending msg to node:%d\n", nq->node->handle);
+			sendMessage(nq->node, msg);
 	
+			// increment the 'waiting' count for the nq.
+			nq->waiting ++;
+			assert(nq->waiting > 0 && nq->waiting <= nq->max);
+	
+			// if the node has reached the max number of consumed messages, then it
+			// will be put in the busy list.
+			if (nq->waiting >= nq->max) {
+				if (q->ready_tail == q->ready_head) q->ready_tail = NULL;
+				if (nq->next) nq->next->prev = NULL;
+				q->ready_head = nq->next;
+				assert(nq->prev == NULL);
+				nq->next = q->busy;
+				q->busy = nq;
+			}
+			else {
+				// if the 'available' is less than the next node in the list, then
+				// move this node to the end of the ready list.
 
+				assert(q->ready_head);
+				assert(q->ready_tail);
+				if (q->ready_head->next) {
+					if ((q->ready_head->next->max - q->ready_head->next->waiting) > (nq->max - nq->waiting)) {
+						assert(nq->prev == NULL);
+						nq->prev = q->ready_tail;
+						assert(q->ready_tail->next == NULL);
+						q->ready_tail->next = nq;
 
-
-		
+						q->ready_head = nq->next;
+						assert(nq->next->prev == nq);
+						nq->next->prev = NULL;
+						nq->next = NULL;
+						
+						q->ready_tail = nq;
+					}
+				}
+			}
+				
+			// remove the msg from the msglist, and add it to the msgproc list.
+			qm = q->msghead;
+			if (qm->next) qm->next->prev = NULL;
+			q->msghead = qm->next;
+			qm->next = q->msgproc;
+			assert(q->msgproc->prev == NULL);
+			q->msgproc->prev = qm;
+			q->msgproc = qm;
+		}
 	}
 
-	assert(0);
+	// return the action to the action pool.
+	action_pool_return(action);	
 }
 
 
@@ -451,6 +531,23 @@ void ah_msg_countdown(action_t *action)
 	assert(action);
 
 	assert(0);
+}
+
+
+//-----------------------------------------------------------------------------
+// This action is used to delete a message.  It will only delete the message if
+// it is safe to do so.  If it cannot delete the message, it will simply exit,
+// returning the action.  When other activities occur that might allow for the
+// message to be deleted, it will raise the action again.
+void ah_msg_delete(action_t *action)
+{
+	assert(action);
+
+	assert(0);
+
+	// return the action to the action pool.
+	action_pool_return(action);	
+	
 }
 
 
