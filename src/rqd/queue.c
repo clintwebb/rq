@@ -136,6 +136,9 @@ void queue_addmsg(queue_t *queue, message_t *msg)
 	// ** in trying to conserve memory by using the same structure from the originating node, the receiving nodes, and also in the queues, then we 
 
 
+	// update the refcount for the message.
+	msg->refcount ++;
+
 	assert(0);
 }
 

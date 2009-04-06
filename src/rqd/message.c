@@ -25,6 +25,7 @@ void message_init(message_t *msg, system_data_t *sysdata)
 	msg->next = NULL;
 	msg->prev = NULL;
 	msg->sysdata = sysdata;
+	msg->refcount = 0;
 }
 
 
@@ -34,6 +35,9 @@ void message_free(message_t *msg)
 {
 	assert(msg != NULL);
 	assert(msg->sysdata != NULL);
+
+	// If we are freeing the message, there shouldn't be anything referencing it.
+	assert(msg->refcount == 0);
 
 	if (msg->data != NULL) {
 		expbuf_pool_return(msg->sysdata->bufpool, msg->data);
