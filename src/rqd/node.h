@@ -8,7 +8,6 @@
 #include <rq.h>
 
 #include "data.h"
-#include "message.h"
 #include "system_data.h"
 
 
@@ -19,16 +18,15 @@
 #define FLAG_NODE_CONTROLLER	4
 #define FLAG_NODE_NOQUEUES    8
 
-typedef struct __node_t {
+typedef struct {
 	int handle;
 	unsigned short flags;
 	struct event event;
 	expbuf_t *in, *waiting, *out, *build;
 	data_t data;
 	system_data_t *sysdata;
-	message_t *msglist;
+	list_t msglist;
 	int refcount;
-	struct __node_t *next, *prev;
 } node_t ;
 
 

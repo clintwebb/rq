@@ -3,12 +3,10 @@
 
 
 #include <event.h>
-#include <risp.h>
 #include <expbuf.h>
+#include <linklist.h>
+#include <risp.h>
 
-#include "node.h"
-#include "stats.h"
-#include "queue.h"
 #include "system_data.h"
 
 #define MAX_SERVERS 5
@@ -22,7 +20,7 @@ typedef struct {
 	} servers[MAX_SERVERS];
 	int                active;			// number of active nodes.
 	int                maxconns;		// max number of nodes.
-	node_t            *nodelist;		// array of node objects (x maxconns).
+	list_t             nodelist;		// array of node objects (x maxconns).
 	short              shutdown;
 	system_data_t     *sysdata;
 } server_t;

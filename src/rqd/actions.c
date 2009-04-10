@@ -1,8 +1,10 @@
 ///// action.c
 
 #include "actions.h"
+#include "queue.h"
 #include "send.h"
 #include "server.h"
+#include "stats.h"
 
 #include <assert.h>
 #include <evactions.h>
@@ -24,6 +26,7 @@ void ah_server_shutdown(action_t *action)
 	node_t *node;
 	int i;
 	unsigned char verbose = 0;
+	void *next;
 	
 	assert(action != NULL);
 	assert(action->shared != NULL);
@@ -55,7 +58,8 @@ void ah_server_shutdown(action_t *action)
 		// All active nodes should be informed that we are shutting down.
 		assert(sysdata->actpool != NULL);
 		if (verbose) printf("Firing event to shutdown nodes.\n");
-		node = server->nodelist;
+		next = ll_start(&server->nodelist);
+		node = ll_next(&server->nodelist, &next);
 		while (node) {
 			
 			assert(node->handle > 0);
@@ -69,13 +73,14 @@ void ah_server_shutdown(action_t *action)
 			if (verbose)
 				printf("Initiating shutdown of node %d.\n", node->handle);
 		
-			node = node->next;
+			node = ll_next(&server->nodelist, &next);
 		}
 		
 		// fire an action for each queue.
 		assert(sysdata->actpool != NULL);
 		if (verbose) printf("Initiating shutdown of queues.\n");
-		q = sysdata->queues;
+		next = ll_start(sysdata->queues);
+		q = ll_next(sysdata->queues, next);
 		while (q) {
 			assert(q->name != NULL);
 			assert(q->qid > 0);
@@ -89,7 +94,7 @@ void ah_server_shutdown(action_t *action)
 					q->qid,
 					q->name);
 
-			q = q->next;
+			q = ll_next(sysdata->queues, next);
 		}
 
 		// fire this action again, because we are not finished.
@@ -101,12 +106,12 @@ void ah_server_shutdown(action_t *action)
 		// if already shutting down
 
 		// check that all nodes have shutdown.
-		if (server->nodelist && verbose)
+		if (ll_count(&server->nodelist) > 0 && verbose)
 			printf("Waiting for %d nodes to shutdown.\n", server->active);
-		else if (sysdata->queues && verbose)
+		else if (ll_count(sysdata->queues) > 0 && verbose)
 			printf("Waiting for queues to shutdown.\n");
 		
-		if (server->nodelist == NULL && sysdata->queues == NULL) {
+		if (ll_count(&server->nodelist) == 0 && ll_count(sysdata->queues) == 0) {
 			// we are good to quit.
 			// stop stats timer event.
 			assert(sysdata != NULL);
@@ -162,7 +167,7 @@ void ah_node_shutdown(action_t *action)
 
 	// We are still connected to the node, so we need to put a timeout on the
 	// messages the node is servicing.
-	if (node->handle != INVALID_HANDLE && node->msglist) {
+	if (node->handle != INVALID_HANDLE && ll_count(&node->msglist)) {
 
 		// need to set a timeout on the messages.
 		assert(0);
@@ -176,7 +181,7 @@ void ah_node_shutdown(action_t *action)
 		// we are not connected to the node anymore, so we cannot service the
 		// messages that we were waiting for, so we need to return replies on
 		// undelivery to the source nodes.
-		if (node->handle == INVALID_HANDLE && node->msglist) {
+		if (node->handle == INVALID_HANDLE && ll_count(&node->msglist) > 0) {
 			
 			// send undelivered notices to the owners of all the pending messages
 			// or return the message to the queue.
@@ -186,7 +191,7 @@ void ah_node_shutdown(action_t *action)
 		// if we have done all we need to do, but still have a valid handle, then we should close it, and delete the event.
 		if (node->handle != INVALID_HANDLE && node->out->length == 0) {
 			assert(node->out->length == 0);
-			assert(node->msglist == NULL);
+			assert(ll_count(&node->msglist) == 0);
 			assert(node->handle > 0);
 			close(node->handle);
 			node->handle = INVALID_HANDLE;
@@ -201,12 +206,8 @@ void ah_node_shutdown(action_t *action)
 			// remove the node from the server object.
 			server = sysdata->server;
 			assert(server);
-			assert(server->nodelist);
-			if (server->nodelist == node) server->nodelist = node->next;
-			if (node->next) node->next->prev = node->prev;
-			if (node->prev) node->prev->next = node->next;
-			node->prev = NULL;
-			node->next = NULL;
+			assert(ll_count(&server->nodelist) > 0);
+			ll_remove(&server->nodelist, node, NULL);
 			
 			// free the resources used by the node.
 			node_free(node);
@@ -231,7 +232,7 @@ void ah_node_shutdown(action_t *action)
 // been stopped, then we can exit.
 void ah_queue_shutdown(action_t *action)
 {
-	queue_t *queue, *tmp;
+	queue_t *queue;
 	system_data_t *sysdata;
 	
 	assert(action != NULL);
@@ -243,31 +244,25 @@ void ah_queue_shutdown(action_t *action)
 	queue = action->data;
 
 	// if there is pending messages to deliver, then reply to the source, indicating unable to deliver.
-	if (queue->msghead != NULL) {
+	if (ll_count(&queue->msg_pending) > 0) {
 		// We have a message that needs to be returned.
 
 		assert(0);
 	}
 	
+	// if we have messages being processed, might need to reply to source.
+	if (ll_count(&queue->msg_proc) > 0) {
+		// We have a message that needs to be returned.
+
+		assert(0);
+	}
+
+
 	// delete the list of nodes that are consuming this queue.
 	assert(0);   // code needs to be changed.
 	
 	// Delete the queue from the queue list.
-	tmp = sysdata->queues;
-	assert(tmp);
-	while (tmp) {
-		if (tmp == queue) {
-			if (sysdata->queues == tmp) sysdata->queues = tmp->next;
-			if (tmp->prev) tmp->prev->next = tmp->next;
-			if (tmp->next) tmp->next->prev = tmp->prev;
-			queue_free(tmp);
-			free(tmp);
-			tmp = NULL;
-		}
-		else {
-			tmp = tmp->next;
-		}
-	}
+	ll_remove(sysdata->queues, queue, NULL);
 
 	action_pool_return(action);
 }
@@ -283,7 +278,6 @@ void ah_stats(action_t *action)
 	int queues;
 	system_data_t *sysdata;
 	stats_t *stats;
-	queue_t *q;
 	server_t *server;
 	
 	assert(action != NULL);
@@ -299,14 +293,7 @@ void ah_stats(action_t *action)
 	assert(server->active >= 0);
 	clients = server->active;
 
-	queues = 0;
-	q = sysdata->queues;
-	while (q) {
-		assert(q->name != NULL);
-		assert(q->qid > 0);
-		queues ++;
-		q = q->next;
-	}
+	queues = ll_count(sysdata->queues);
 
 	assert(stats != NULL);
 	if (stats->in_bytes || stats->out_bytes || stats->requests || stats->replies || stats->broadcasts) {
@@ -362,6 +349,7 @@ void ah_queue_notify(action_t *action)
 	queue_t *queue;
 	server_t *server;
 	node_t *node;
+	void *next;
 	
 	assert(action);
 	
@@ -378,13 +366,14 @@ void ah_queue_notify(action_t *action)
 
 	// now that we have our server object, we can go thru the list of nodes.  If
 	// any of them are controllers, then we need to send a consume request.
-	node = server->nodelist;
+	next = ll_start(&server->nodelist);
+	node = ll_next(&server->nodelist, &next);
 	while (node) {
 		if (BIT_TEST(node->flags, FLAG_NODE_CONTROLLER)) {
 			sendConsume(node, queue->name, 1, QUEUE_LOW_PRIORITY);
 		}
 		
-		node = node->next;
+		node = ll_next(&server->nodelist, &next);
 	}
 
 	// return the action to the action pool.

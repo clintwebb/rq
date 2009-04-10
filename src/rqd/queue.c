@@ -7,8 +7,19 @@
 
 #include <assert.h>
 #include <evactions.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+
+
+// structure to keep track of the node that is consuming the queue
+typedef struct {
+	node_t *node;
+	short int max;				// maximum number of messages this node will process at a time.
+	short int priority;
+	short int waiting;
+} node_queue_t;
 
 
 
@@ -21,15 +32,12 @@ void queue_init(queue_t *queue)
 	queue->qid = 0;
  	queue->flags = 0;
 
-	queue->msghead = NULL;
-	queue->msgtail = NULL;
-	queue->msgproc = NULL;
-
-	queue->busy = NULL;
-	queue->ready_head = NULL;
-	queue->ready_tail = NULL;
+	ll_init(&queue->msg_pending);
+	ll_init(&queue->msg_proc);
+	ll_init(&queue->nodes_busy);
+	ll_init(&queue->nodes_ready);
+	ll_init(&queue->nodes_waiting);
 	
-	queue->waitinglist = NULL;
 	queue->sysdata = NULL;
 }
 
@@ -45,29 +53,27 @@ void queue_free(queue_t *queue)
 		queue->name = NULL;
 	}
 
-	assert(queue->msghead == NULL);
-	assert(queue->msgtail == NULL);
-	assert(queue->msgproc == NULL);
-
-	assert(queue->busy == NULL);
-	assert(queue->ready_head == NULL);
-	assert(queue->ready_tail == NULL);
-
-	assert(queue->waitinglist == NULL);
+	ll_free(&queue->msg_pending);
+	ll_free(&queue->msg_proc);
+	ll_free(&queue->nodes_busy);
+	ll_free(&queue->nodes_ready);
+	ll_free(&queue->nodes_waiting);
 }
 
 
 
 
-queue_t * queue_get_id(queue_t *head, queue_id_t qid)
+queue_t * queue_get_id(list_t *queues, queue_id_t qid)
 {
 	queue_t *q = NULL;
 	queue_t *tmp;
+	void *next;
 
-	assert(head);
+	assert(queues);
 	assert(qid > 0);
 
-	tmp = head;
+	next = ll_start(queues);
+	tmp = ll_next(queues, &next);
 	while (tmp) {
 		assert(tmp->name != NULL);
 		assert(tmp->qid > 0);
@@ -77,7 +83,7 @@ queue_t * queue_get_id(queue_t *head, queue_id_t qid)
 			tmp = NULL;
 		}
 		else {
-			tmp = tmp->next;
+			tmp = ll_next(queues, &next);
 		}
 	}
 	
@@ -85,15 +91,17 @@ queue_t * queue_get_id(queue_t *head, queue_id_t qid)
 }
 
 
-queue_t * queue_get_name(queue_t *head, const char *qname)
+queue_t * queue_get_name(list_t *queues, const char *qname)
 {
 	queue_t *q = NULL;
 	queue_t *tmp;
+	void *next;
 
-	assert(head);
+	assert(queues);
 	assert(qname);
 
-	tmp = head;
+	next = ll_start(queues);
+	tmp = ll_next(queues, &next);
 	while (tmp) {
 		assert(tmp->name != NULL);
 		assert(tmp->qid > 0);
@@ -103,7 +111,7 @@ queue_t * queue_get_name(queue_t *head, const char *qname)
 			tmp = NULL;
 		}
 		else {
-			tmp = tmp->next;
+			tmp = ll_next(queues, &next);
 		}
 	}
 	
@@ -120,18 +128,28 @@ queue_t * queue_get_name(queue_t *head, const char *qname)
 // the best node to deliver it to, and deliver it.
 void queue_addmsg(queue_t *queue, message_t *msg)
 {
+	node_t *node;
+	void *next;
+	
 	assert(queue != NULL);
 	assert(msg != NULL);
 
 	// check the message to see if it is broadcast.
+	if (BIT_TEST(msg->flags, FLAG_MSG_BROADCAST)) {
+		// and make sure that we have a timeout.
+		// for each node in the list, we need to examine to assign the message to it.
+
+		// send the message to all the nodes.
+		
+	}
+	else {
+	}
 	// and make sure that we have a timeout.
 
 	// check to see if the message is a request.
 	// if it is a broadcast request, then we need to create 
 
-// ** Do we need to create a message object for every node that we send the message to?  That could be messy if we have a lot of consumers... or can the nodes share the structure?
 
-	// for each node in the list, we need to examine to assign the message to it.
 
 	// ** in trying to conserve memory by using the same structure from the originating node, the receiving nodes, and also in the queues, then we 
 
@@ -142,19 +160,6 @@ void queue_addmsg(queue_t *queue, message_t *msg)
 	assert(0);
 }
 
-
-// This function is used to initialise the message structure.
-void queue_msg_init(queue_msg_t *msg)
-{
-	assert(msg != NULL);
-	assert(0);
-}
-
-void queue_msg_free(queue_msg_t *msg)
-{
-	assert(msg);
-	assert(0);
-}
 
 
 // this function will look at the flags for the queue, and if we need to 
@@ -191,11 +196,14 @@ void queue_cancel_node(node_t *node)
 	queue_t *queue;
 	node_queue_t *nq;
 	int found;
+	void *next_queue, *next_node;
 	
 	assert(node);
 	assert(node->sysdata);
+	assert(node->sysdata->queues);
 
-	queue = node->sysdata->queues;
+	next_queue = ll_start(node->sysdata->queues);
+	queue = ll_next(node->sysdata->queues, &next_queue);
 	while (queue) {
 		assert(queue->qid > 0);
 		assert(queue->name);
@@ -203,7 +211,8 @@ void queue_cancel_node(node_t *node)
 		found = 0;
 		
 		// need to check this node in the busy
-		nq = queue->busy;
+		next_node = ll_start(&queue->nodes_busy);
+		nq = ll_next(&queue->nodes_busy, &next_node);
 		while (nq && found == 0) {
 
 			assert(nq->node);
@@ -211,24 +220,23 @@ void queue_cancel_node(node_t *node)
 				if (node->sysdata->verbose)
 					printf("queue %d:'%s' removing node:%d from busy list\n", queue->qid, queue->name, node->handle);
 
-				if (nq == queue->busy) queue->busy = nq->next;
-				if (nq->next) nq->next->prev = nq->prev;
-				if (nq->prev) nq->prev->next = nq->next;
+				ll_remove(&queue->nodes_busy, nq, next_node);
 
-				assert(nq->node->refcount > 0);
 				nq->node->refcount --;
+				assert(nq->node->refcount >= 0);
 
 				free(nq);
 				nq = NULL;
 				found++;
 			}
 			else {
-				nq = nq->next;
+				nq = ll_next(&queue->nodes_busy, &next_node);
 			}
 		}
 		
 		// ready
-		nq = queue->ready_head;
+		next_node = ll_start(&queue->nodes_ready);
+		nq = ll_next(&queue->nodes_ready, &next_node);
 		while (nq && found == 0) {
 
 			assert(nq->node);
@@ -236,20 +244,17 @@ void queue_cancel_node(node_t *node)
 				if (node->sysdata->verbose)
 					printf("queue %d:'%s' removing node:%d from ready list\n", queue->qid, queue->name, node->handle);
 
-				if (nq == queue->ready_head) queue->ready_head = nq->next;
-				if (nq == queue->ready_tail) queue->ready_tail = nq->prev;
-				if (nq->next) nq->next->prev = nq->prev;
-				if (nq->prev) nq->prev->next = nq->next;
+				ll_remove(&queue->nodes_ready, nq, next_node);
 				
-				assert(nq->node->refcount > 0);
 				nq->node->refcount --;
+				assert(nq->node->refcount >= 0);
 
 				free(nq);
 				nq = NULL;
 				found++;
 			}
 			else {
-				nq = nq->next;
+				nq = ll_next(&queue->nodes_ready, &next_node);
 			}
 		}
 
@@ -257,29 +262,26 @@ void queue_cancel_node(node_t *node)
 			// The node was found already.  If the queue was in exclusive mode, need
 			// to update the lists and activate the one that is waiting.
 
-			if (BIT_TEST(queue->flags, QUEUE_FLAG_EXCLUSIVE) || (queue->ready_head == NULL && queue->busy == NULL && queue->waitinglist != NULL)) {
+			if (BIT_TEST(queue->flags, QUEUE_FLAG_EXCLUSIVE) ||
+				(ll_count(&queue->nodes_ready) == 0 && ll_count(&queue->nodes_busy) == 0 && ll_count(&queue->nodes_waiting) > 0)) {
 				// queue was already in exclusive mode, and we have removed a node, so that means our main lists should be empty.
-				assert(queue->ready_head == NULL);
-				assert(queue->ready_tail == NULL);
-				assert(queue->busy == NULL);
+				assert(ll_count(&queue->nodes_ready) == 0);
+				assert(ll_count(&queue->nodes_busy) == 0);
 
-				if (queue->waitinglist) {
-
-					nq = queue->waitinglist;
-					queue->ready_head = nq;
-					queue->ready_tail = nq;
-
-					assert(nq->prev == NULL);
-					if (nq->next) nq->next->prev = NULL;
-					queue->waitinglist = nq->next;
-					nq->next = NULL;
-
+				// if we have any nodes waiting, we will use it.
+				nq = ll_pop_tail(&queue->nodes_waiting);
+				if (nq) {
 					assert(nq->node);
 					assert(queue->name);
 					assert(queue->qid > 0);
+
+					// add it to the ready list.
+					ll_push_head(&queue->nodes_ready, nq);
+
+					// tell the node that we are consuming the queue now.
 					sendConsumeReply(nq->node, queue->name, queue->qid);
 
-					if (queue->msghead) {
+					if (ll_count(&queue->msg_pending) > 0) {
 						// there are messages that need to be delivered.  Not sure yet, whether to assign an action to do this, or what...
 						assert(0);
 					}
@@ -288,35 +290,35 @@ void queue_cancel_node(node_t *node)
 						printf("Promoting waiting node:%d to EXCLUSIVE queue '%s'.\n", nq->node->handle, queue->name);
 				}
 			}
-			
+		}
+		else {
+		
+			// and waiting list.
+			next_node = ll_start(&queue->nodes_waiting);
+			nq = ll_next(&queue->nodes_waiting, &next_node);
+			while (nq && found == 0) {
+	
+				assert(nq->node);
+				if (nq->node == node) {
+					if (node->sysdata->verbose)
+						printf("queue %d:'%s' removing node:%d from waitinglist\n", queue->qid, queue->name, node->handle);
+	
+					ll_remove(&queue->nodes_waiting, nq, next_node);
+					
+					assert(nq->node->refcount > 0);
+					nq->node->refcount --;
+	
+					free(nq);
+					nq = NULL;
+					found++;
+				}
+				else {
+					nq = ll_next(&queue->nodes_waiting, &next_node);
+				}
+			}
 		}
 		
-		// and waiting list.
-		nq = queue->waitinglist;
-		while (nq && found == 0) {
-
-			assert(nq->node);
-			if (nq->node == node) {
-				if (node->sysdata->verbose)
-					printf("queue %d:'%s' removing node:%d from waitinglist\n", queue->qid, queue->name, node->handle);
-
-				if (nq == queue->waitinglist) queue->waitinglist = nq->next;
-				if (nq->next) nq->next->prev = nq->prev;
-				if (nq->prev) nq->prev->next = nq->next;
-
-				assert(nq->node->refcount > 0);
-				nq->node->refcount --;
-
-				free(nq);
-				nq = NULL;
-				found++;
-			}
-			else {
-				nq = nq->next;
-			}
-		}
-
-		queue = queue->next;
+		queue = ll_next(node->sysdata->queues, &next_queue);
 	}
 }
 
@@ -348,16 +350,10 @@ queue_t * queue_create(system_data_t *sysdata, char *qname)
 	assert(strlen(qname) < 256);
 	q->name =strdup(qname);
 
-	// add the queue to the queue list.
-	assert(q->prev == NULL);
-	q->next = sysdata->queues;
-	if (q->next) {
-		assert(q->next->prev == NULL);
-		q->next->prev = q;
-	}
-	sysdata->queues = q;
-
 	q->sysdata = sysdata;
+
+	// add the queue to the queue list.
+	ll_push_head(sysdata->queues, q);
 
 	// set an action so that we can notify other nodes (controllers) that we are consuming a queue.
 	assert(sysdata->actpool);
@@ -366,5 +362,65 @@ queue_t * queue_create(system_data_t *sysdata, char *qname)
 	action = NULL;
 
 	return (q);
+}
+
+
+//-----------------------------------------------------------------------------
+// Add the node to the queue as a consumer.  If the node is requesting an
+// exclusive consume, then we will accept it if we aren't already processing
+// any others.  Otherwise it will go on the waiting list.
+int queue_add_node(queue_t *queue, node_t *node, int max, int priority, unsigned int flags)
+{
+	node_queue_t *nq;
+	
+	assert(queue);
+	assert(node);
+	assert(max >= 0);
+	assert(priority >= 0);
+		
+	// We need to create a node_queue_t object to hold the node details in it.
+	nq = (node_queue_t *) malloc(sizeof(node_queue_t));
+	nq->node = node;
+	nq->max = max;
+	nq->priority = priority;
+	nq->waiting = 0;
+
+
+	// check to see if the current queue settings are for it to be
+	// exclusive.   If so, then we will need to add this node to the waiting
+	// list.
+	if (BIT_TEST(queue->flags, QUEUE_FLAG_EXCLUSIVE) || ll_count(&queue->nodes_ready) > 0 || ll_count(&queue->nodes_busy) > 0) {
+		// The queue is already in exclusive mode (or already has members that
+		// are not exlusive).  So this node would need to be added to the
+		// waiting list.
+
+		ll_push_head(&queue->nodes_waiting, nq);
+
+		if (node->sysdata->verbose > 1)
+			printf("processConsume - Defered, queue already consumed exclusively.\n");
+
+		return (0);
+	}
+	else {
+			
+		// if the consume request was for an EXCLUSIVE queue (and since we got
+		// this far it means that no other nodes are consuming this queue yet),
+		// then we mark it as exclusive.
+		if (BIT_TEST(flags, QUEUE_FLAG_EXCLUSIVE)) {
+			assert(ll_count(&queue->nodes_ready) == 0);
+			assert(ll_count(&queue->nodes_busy) == 0);
+			BIT_SET(queue->flags, QUEUE_FLAG_EXCLUSIVE);
+			if (node->sysdata->verbose)
+				printf("Consuming Queue '%s' in EXCLUSIVE mode.\n", expbuf_string(&node->data.queue));
+		}
+
+		// add the node to the appropriate list.
+		ll_push_head(&queue->nodes_ready, nq);
+
+		if (node->sysdata->verbose)
+			printf("Consuming queue: qid=%d\n", queue->qid);
+
+		return(1);	
+	}
 }
 

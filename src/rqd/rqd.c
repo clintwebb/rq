@@ -11,6 +11,7 @@
 #include "daemon.h"
 #include "server.h"
 #include "settings.h"
+#include "stats.h"
 #include "system_data.h"
 
 // includes
@@ -173,11 +174,7 @@ int main(int argc, char **argv)
 	settings_t     *settings = NULL;
 	server_t       *server   = NULL;
 	stats_t        *stats    = NULL;
-	risp_t         *risp     = NULL;
-	expbuf_pool_t  *bufpool  = NULL;
-	action_pool_t  *actpool  = NULL;
 	action_t       *action   = NULL;
-	mempool_t      *msgpool  = NULL;
 
 	system_data_t   sysdata;
 	int i;
@@ -237,16 +234,14 @@ int main(int argc, char **argv)
 
 	// Creating our buffer pool.
 	if (settings->verbose) printf("Creating the Buffer pool.\n");
-	bufpool = (expbuf_pool_t *) malloc(sizeof(expbuf_pool_t));
-	expbuf_pool_init(bufpool, 0);
-	sysdata.bufpool = bufpool;
+	sysdata.bufpool = (expbuf_pool_t *) malloc(sizeof(expbuf_pool_t));
+	expbuf_pool_init(sysdata.bufpool, 0);
 
 	// Creating our actions pool.
 	assert(sysdata.evbase != NULL);
 	if (settings->verbose) printf("Creating the Action pool.\n");
-	actpool = (action_pool_t *) malloc(sizeof(action_pool_t));
-	action_pool_init(actpool, sysdata.evbase, &sysdata);
-	sysdata.actpool = actpool;
+	sysdata.actpool = (action_pool_t *) malloc(sizeof(action_pool_t));
+	action_pool_init(sysdata.actpool, sysdata.evbase, &sysdata);
 
 	// create and init the 'server' structure.
 	if (settings->verbose) printf("Starting server listener on port %d.\n", settings->port);
@@ -270,7 +265,7 @@ int main(int argc, char **argv)
 		}
 	}
 
-	assert(actpool != NULL);
+	assert(sysdata.actpool != NULL);
 	assert(sysdata.server != NULL);
 
 	// initialise clock event.  The clock event is used to keep up our node 
@@ -294,36 +289,34 @@ int main(int argc, char **argv)
 	sysdata.stats = stats;
 
 	// setup an action to output the stats every second.
-	assert(actpool != NULL);
-	action = action_pool_new(actpool);
+	assert(sysdata.actpool != NULL);
+	action = action_pool_new(sysdata.actpool);
 	action_set(action, 1000, ah_stats, stats);
 	action = NULL;
 
 
 	// Initialise the risp system.
-	risp = risp_init();
-	assert(risp != NULL);
-	risp_add_invalid(risp, &cmdInvalid);
-	risp_add_command(risp, RQ_CMD_CLEAR, 	      &cmdClear);
-	risp_add_command(risp, RQ_CMD_EXECUTE,      &cmdExecute);
-	risp_add_command(risp, RQ_CMD_REQUEST,      &cmdRequest);
-	risp_add_command(risp, RQ_CMD_REPLY,        &cmdReply);
-	risp_add_command(risp, RQ_CMD_RECEIVED,     &cmdReceived);
-	risp_add_command(risp, RQ_CMD_DELIVERED,    &cmdDelivered);
-	risp_add_command(risp, RQ_CMD_BROADCAST,    &cmdBroadcast);
-	risp_add_command(risp, RQ_CMD_NOREPLY,      &cmdNoReply);
-	risp_add_command(risp, RQ_CMD_CONSUME,      &cmdConsume);
-	risp_add_command(risp, RQ_CMD_CANCEL_QUEUE, &cmdCancelQueue);
-	risp_add_command(risp, RQ_CMD_EXCLUSIVE,    &cmdExclusive);
-	risp_add_command(risp, RQ_CMD_ID,           &cmdId);
-	risp_add_command(risp, RQ_CMD_TIMEOUT,      &cmdTimeout);
-	risp_add_command(risp, RQ_CMD_MAX,          &cmdMax);
-	risp_add_command(risp, RQ_CMD_PRIORITY,     &cmdPriority);
-	risp_add_command(risp, RQ_CMD_QUEUE,        &cmdQueue);
-	risp_add_command(risp, RQ_CMD_PAYLOAD,      &cmdPayload);
+	sysdata.risp = risp_init();
+	assert(sysdata.risp != NULL);
+	risp_add_invalid(sysdata.risp, &cmdInvalid);
+	risp_add_command(sysdata.risp, RQ_CMD_CLEAR, 	      &cmdClear);
+	risp_add_command(sysdata.risp, RQ_CMD_EXECUTE,      &cmdExecute);
+	risp_add_command(sysdata.risp, RQ_CMD_REQUEST,      &cmdRequest);
+	risp_add_command(sysdata.risp, RQ_CMD_REPLY,        &cmdReply);
+	risp_add_command(sysdata.risp, RQ_CMD_RECEIVED,     &cmdReceived);
+	risp_add_command(sysdata.risp, RQ_CMD_DELIVERED,    &cmdDelivered);
+	risp_add_command(sysdata.risp, RQ_CMD_BROADCAST,    &cmdBroadcast);
+	risp_add_command(sysdata.risp, RQ_CMD_NOREPLY,      &cmdNoReply);
+	risp_add_command(sysdata.risp, RQ_CMD_CONSUME,      &cmdConsume);
+	risp_add_command(sysdata.risp, RQ_CMD_CANCEL_QUEUE, &cmdCancelQueue);
+	risp_add_command(sysdata.risp, RQ_CMD_EXCLUSIVE,    &cmdExclusive);
+	risp_add_command(sysdata.risp, RQ_CMD_ID,           &cmdId);
+	risp_add_command(sysdata.risp, RQ_CMD_TIMEOUT,      &cmdTimeout);
+	risp_add_command(sysdata.risp, RQ_CMD_MAX,          &cmdMax);
+	risp_add_command(sysdata.risp, RQ_CMD_PRIORITY,     &cmdPriority);
+	risp_add_command(sysdata.risp, RQ_CMD_QUEUE,        &cmdQueue);
+	risp_add_command(sysdata.risp, RQ_CMD_PAYLOAD,      &cmdPayload);
 
-	assert(sysdata.risp == NULL);
-	sysdata.risp = risp;
 
 	// connect to other controller.
 	if (settings->primary != NULL) {
@@ -335,10 +328,15 @@ int main(int argc, char **argv)
 	}
 
 	// Create the message pool.
-	msgpool = (mempool_t *) malloc(sizeof(mempool_t));
-	mempool_init(msgpool);
-	sysdata.msgpool = msgpool;
+	sysdata.msgpool = (mempool_t *) malloc(sizeof(mempool_t));
+	mempool_init(sysdata.msgpool);
+	assert(sysdata.msgpool);
 
+
+	// initialise the empty linked-list of queues.
+	sysdata.queues = (list_t *) malloc(sizeof(list_t));
+	ll_init(sysdata.queues);
+	assert(sysdata.queues);
 	
 ///============================================================================
 /// Main Event Loop.
@@ -350,8 +348,8 @@ int main(int argc, char **argv)
     
 	// The event loop was exited, this means that we received an interrupt
 	// signal.  We need to create an appropriate action object.
-	assert(actpool != NULL);
-	action = action_pool_new(actpool);
+	assert(sysdata.actpool != NULL);
+	action = action_pool_new(sysdata.actpool);
 	action_set(action, 0, ah_server_shutdown, NULL);
 	action = NULL;
 	if (settings->verbose) printf("Initiated Shutdown procedure.\n");
@@ -369,10 +367,8 @@ int main(int argc, char **argv)
 
 	// Cleanup the message pool.
 	assert(sysdata.msgpool);
-	assert(msgpool == sysdata.msgpool);
-	mempool_free(msgpool);
-	free(msgpool);
-	msgpool = NULL;
+	mempool_free(sysdata.msgpool);
+	free(sysdata.msgpool);
 	sysdata.msgpool = NULL;
 
 	// cleanup 'server', which should cleanup all the 'nodes'
@@ -381,12 +377,14 @@ int main(int argc, char **argv)
 	server = NULL;
 	sysdata.server = NULL;
 
-	// The queue list should already be cleared as part of the event shutdown.
-	assert(sysdata.queues == NULL);
+	// The queue list should already be cleared as part of the server shutdown event.
+	assert(sysdata.queues);
+	ll_free(sysdata.queues);
+	free(sysdata.queues);
+	sysdata.queues = NULL;
 	
 	// cleanup risp library.
-	risp_shutdown(risp);
-	risp = NULL;
+	risp_shutdown(sysdata.risp);
 	sysdata.risp = NULL;
     
 	if (sysdata.verbose) printf("\n\nExiting.\n");
@@ -407,17 +405,15 @@ int main(int argc, char **argv)
 	sysdata.stats = NULL;
 
 	// cleanup the expanding buffer pool.
-	assert(bufpool != NULL);
-	expbuf_pool_free(bufpool);
-	free(bufpool);
-	bufpool = NULL;
+	assert(sysdata.bufpool != NULL);
+	expbuf_pool_free(sysdata.bufpool);
+	free(sysdata.bufpool);
 	sysdata.bufpool = NULL;
 
 	// cleanup the action pool.
-	assert(actpool != NULL);
-	action_pool_free(actpool);
-	free(actpool);
-	actpool = NULL;
+	assert(sysdata.actpool != NULL);
+	action_pool_free(sysdata.actpool);
+	free(sysdata.actpool);
 	sysdata.actpool = NULL;
 
 	// cleanup the settings object.

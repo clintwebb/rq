@@ -40,10 +40,7 @@ void node_init(node_t *node, system_data_t *sysdata)
 	node->out     = expbuf_pool_new(sysdata->bufpool, DEFAULT_BUFFSIZE);
 	node->build   = expbuf_pool_new(sysdata->bufpool, 16);
 
-	node->msglist = NULL;
-
-	node->next = NULL;
-	node->prev = NULL;
+	ll_init(&node->msglist);
 
 	data_init(&node->data);
 	
@@ -63,9 +60,6 @@ void node_free(node_t *node)
 	system_data_t *sysdata;
 	
 	assert(node != NULL);
-
-	assert(node->next == NULL);
-	assert(node->prev == NULL);
 
 	assert(node->sysdata != NULL);
 	sysdata = node->sysdata;
@@ -106,7 +100,7 @@ void node_free(node_t *node)
 
 	// make sure that all the messages for this node have been processed first.
 	// And then free the memory that was used for the list.
-	assert(node->msglist == NULL);
+	ll_free(&node->msglist);
 
 	// make sure that this node has been removed from all consumer queues.
 	if (node->sysdata->queues)
@@ -142,8 +136,7 @@ static void node_closed(node_t *node)
 	if (node->sysdata->queues) queue_cancel_node(node);
 
 	// we need to remove (return) any messages that this node was processing.
-	msg = node->msglist;
-	while (msg) {
+	while ((msg = ll_pop_head(&node->msglist)) != NULL) {
 		// we have a message that we need to deal with.
 
 		// if this node was a destination for the message then we need to return a FAILURE to the source.
@@ -154,8 +147,6 @@ static void node_closed(node_t *node)
 
 		// detatch message from node, and the node from the message and then set an action to deal with the message.
 		assert(0);
-		
-		msg = msg->next;
 	}
 	
 	// need to cancel the event.
@@ -166,7 +157,6 @@ static void node_closed(node_t *node)
 	}
 
 	// setup an action to free the node.
-	assert(node->sysdata->actpool);
 	action = action_pool_new(node->sysdata->actpool);
 	action_set(action, 0, ah_node_shutdown, node);
 	node->refcount ++;

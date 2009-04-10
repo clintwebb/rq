@@ -4,6 +4,7 @@
 #include <evactions.h>
 #include <event.h>
 #include <expbufpool.h>
+#include <linklist.h>
 #include <mempool.h>
 #include <risp.h>
 
@@ -18,7 +19,7 @@ typedef struct {
 	void *settings;
 	void *server;
 	void *stats;
-	void *queues;
+	list_t *queues;
 } system_data_t;
 
 

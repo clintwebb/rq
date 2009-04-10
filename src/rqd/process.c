@@ -67,21 +67,17 @@ void processRequest(node_t *node)
 	
 			q = (queue_t *) malloc(sizeof(queue_t));
 			queue_init(q);
-			if (node->sysdata->queues) {
-				tmp = node->sysdata->queues;
-				assert(tmp->qid > 0);
-				q->qid = tmp->qid + 1;
-				tmp->prev = q;
-				q->next = tmp;
-			}
-			else {
-				assert(q->next == NULL);
-				q->qid = 1;
-			}
-			node->sysdata->queues = q;
-			assert(q->prev == NULL);			
+
+			// look at the qid for the queue that is currently at the top of the list and set ours +1.
+			tmp = ll_get_head(node->sysdata->queues);
+			if (tmp) { q->qid = tmp->qid + 1; }
+			else { q->qid = 1; }
+
+			// add the queue to the queue list.
+			ll_push_head(node->sysdata->queues, q);
 		}
 		assert(q);
+		assert(ll_count(node->sysdata->queues) > 0);
 		
 		// add the message to the queue.
 		queue_addmsg(q, msg);
@@ -107,7 +103,9 @@ void processReply(node_t *node)
 void processConsume(node_t *node)
 {
  	queue_t *q=NULL;
- 	node_queue_t *nq;
+ 	int max;
+ 	int priority;
+ 	unsigned int flags;
 	
 	assert(node);
 	assert(node->sysdata);
@@ -140,72 +138,27 @@ void processConsume(node_t *node)
 		// queue options.
 		assert(q != NULL);
 
+		max = 0;
+		priority = 0;
+		flags = 0;
 
-		// We need to create a node_queue_t object to hold the node details in it.
-		nq = (node_queue_t *) malloc(sizeof(node_queue_t));
-		nq->node = node;
-		nq->max = 0;
-		nq->priority = 0;
-		nq->waiting = 0;
-		nq->next = NULL;
-		nq->prev = NULL;
-
-		if (BIT_TEST(node->data.mask, DATA_MASK_MAX)) nq->max = node->data.max;
-		if (BIT_TEST(node->data.mask, DATA_MASK_PRIORITY)) nq->priority = node->data.priority;
-
-		// check to see if the current queue settings are for it to be
-		// exclusive.   If so, then we will need to add this node to the waiting
-		// list.
-		if (BIT_TEST(q->flags, QUEUE_FLAG_EXCLUSIVE) || q->ready_head || q->busy) {
-			// The queue is already in exclusive mode (or already has members that are not exlusive).  So this node would need to
-			// be added to the waiting list.
-
-			assert(nq->prev == NULL);
-			nq->next = q->waitinglist;
-			if (q->waitinglist) {
-				assert(q->waitinglist->prev == NULL);
-				q->waitinglist->prev = nq;
-			}
-			q->waitinglist = nq;
-
-			if (node->sysdata->verbose > 1)
-				printf("processConsume - Defered, queue already consumed exclusively.\n");
-		}
-		else {
+		if (BIT_TEST(node->data.mask, DATA_MASK_MAX))
+			max = node->data.max;
 			
-			// if the consume request was for an EXCLUSIVE queue (and since we got
-			// this far it means that no other nodes are consuming this queue yet),
-			// then we mark it as exclusive.
-			if (BIT_TEST(node->data.flags, DATA_FLAG_EXCLUSIVE)) {
-				assert(q->ready_head == NULL);
-				assert(q->ready_tail == NULL);
-				assert(q->busy == NULL);
-				q->flags |= QUEUE_FLAG_EXCLUSIVE;
-				if (node->sysdata->verbose)
-					printf("Consuming Queue '%s' in EXCLUSIVE mode.\n", expbuf_string(&node->data.queue));
-			}
+		if (BIT_TEST(node->data.mask, DATA_MASK_PRIORITY))
+			priority = node->data.priority;
+			
+		if (BIT_TEST(node->data.flags, DATA_FLAG_EXCLUSIVE))
+			BIT_SET(flags, QUEUE_FLAG_EXCLUSIVE);
 
-			// add the node to the appropriate list.
-			assert(nq->prev == NULL);
-			nq->next = q->ready_head;
-			if (q->ready_tail == NULL) q->ready_tail = nq;
-			if (q->ready_head) {
-				assert(q->ready_head->prev == NULL);
-				q->ready_head->prev = nq;
-			}
-			q->ready_head = nq;
-			
-			
+		if (queue_add_node(q, node, max, priority, flags) > 0) {
 			// send reply back to the node.
 			sendConsumeReply(node, q->name, q->qid);
-			
-			if (node->sysdata->verbose)
-				printf("Consuming queue: qid=%d\n", q->qid);
 		}
 
 	
 		// need to check the queue to see if there are messages pending.  If there are, then send some to this node.
-		if (q->msghead != NULL) {
+		if (ll_count(&q->msg_pending) > 0) {
 	
 			// not done.
 			assert(0);
