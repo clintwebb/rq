@@ -26,7 +26,6 @@ typedef struct __message_t {
 	void          *target_node;
 	void          *queue;
 	system_data_t *sysdata;
-	int            refcount;
 } message_t;
 
 

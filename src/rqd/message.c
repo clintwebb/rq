@@ -23,7 +23,6 @@ void message_init(message_t *msg, system_data_t *sysdata)
 	msg->target_node = NULL;
 	msg->queue = NULL;
 	msg->sysdata = sysdata;
-	msg->refcount = 0;
 }
 
 
@@ -35,16 +34,14 @@ void message_free(message_t *msg)
 	assert(msg->sysdata != NULL);
 
 	// If we are freeing the message, there shouldn't be anything referencing it.
-	assert(msg->refcount == 0);
+	assert(msg->source_node == NULL);
+	assert(msg->target_node == NULL);
+	assert(msg->queue == NULL);
 
 	if (msg->data != NULL) {
 		expbuf_pool_return(msg->sysdata->bufpool, msg->data);
 		msg->data = NULL;
 	}
-
-	msg->source_node = NULL;
-	msg->target_node = NULL;
-	msg->queue = NULL;
 }
 
 //-----------------------------------------------------------------------------

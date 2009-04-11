@@ -140,9 +140,36 @@ void queue_addmsg(queue_t *queue, message_t *msg)
 		// for each node in the list, we need to examine to assign the message to it.
 
 		// send the message to all the nodes.
+ 		assert(0);
+
+		// make sure that message doesn't include pointer to source node.
+ 		assert(0);
+
+		// make sure message does not have target pointer.
+ 		assert(0);
+
+		// make sure message does not have queue pointer.
+ 		assert(0);
+
+		// create action to delete the message structure.
+ 		assert(0);
+		
 		
 	}
 	else {
+		// not broadcast.
+
+		if (BIT_TEST(msg->flags, FLAG_MSG_NOREPLY)) {
+
+			//	make sure that the message doesn't include pointer to source node.
+	 		assert(0);
+
+			// get details of ready node.
+ 			assert(0);
+
+		}
+		
+		
 	}
 	// and make sure that we have a timeout.
 
@@ -154,8 +181,6 @@ void queue_addmsg(queue_t *queue, message_t *msg)
 	// ** in trying to conserve memory by using the same structure from the originating node, the receiving nodes, and also in the queues, then we 
 
 
-	// update the refcount for the message.
-	msg->refcount ++;
 
 	assert(0);
 }
