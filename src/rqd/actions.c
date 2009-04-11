@@ -80,7 +80,7 @@ void ah_server_shutdown(action_t *action)
 		assert(sysdata->actpool != NULL);
 		if (verbose) printf("Initiating shutdown of queues.\n");
 		next = ll_start(sysdata->queues);
-		q = ll_next(sysdata->queues, next);
+		q = ll_next(sysdata->queues, &next);
 		while (q) {
 			assert(q->name != NULL);
 			assert(q->qid > 0);
@@ -94,7 +94,7 @@ void ah_server_shutdown(action_t *action)
 					q->qid,
 					q->name);
 
-			q = ll_next(sysdata->queues, next);
+			q = ll_next(sysdata->queues, &next);
 		}
 
 		// fire this action again, because we are not finished.
