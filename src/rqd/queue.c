@@ -128,63 +128,25 @@ queue_t * queue_get_name(list_t *queues, const char *qname)
 // the best node to deliver it to, and deliver it.
 void queue_addmsg(queue_t *queue, message_t *msg)
 {
-	node_t *node;
-	void *next;
+	action_t *action;
 	
-	assert(queue != NULL);
-	assert(msg != NULL);
-
-	// check the message to see if it is broadcast.
-	if (BIT_TEST(msg->flags, FLAG_MSG_BROADCAST)) {
-		// and make sure that we have a timeout.
-		// for each node in the list, we need to examine to assign the message to it.
-
-		// send the message to all the nodes.
- 		assert(0);
-
-		// make sure that message doesn't include pointer to source node.
- 		assert(0);
-
-		// make sure message does not have target pointer.
- 		assert(0);
-
-		// make sure message does not have queue pointer.
- 		assert(0);
-
-		// create action to delete the message structure.
- 		assert(0);
-		
-		
-	}
-	else {
-		// not broadcast.
-
-		if (BIT_TEST(msg->flags, FLAG_MSG_NOREPLY)) {
-
-			//	make sure that the message doesn't include pointer to source node.
-	 		assert(0);
-
-			// get details of ready node.
- 			assert(0);
-
-		}
-		
-		
-	}
-	// and make sure that we have a timeout.
-
-	// check to see if the message is a request.
-	// if it is a broadcast request, then we need to create 
-
 	assert(queue);
 	assert(msg);
 	assert(queue->sysdata);
 
+	assert(msg->queue == NULL);
+	msg->queue = queue;
 
-	// assign the message to the qm.
-// 	qm->msg = msg;
+	// add the message to the queue, and then create an action (if this was the first )
+	ll_push_tail(&queue->msg_pending, msg);
 
-	assert(0);
+	// if the only message in the list is the one we just added, then we will create an action to process it.
+	if (ll_count(&queue->msg_pending) == 1) {
+		assert(queue->sysdata->actpool);
+		action = action_pool_new(queue->sysdata->actpool);
+		action_set(action, 0, ah_queue_deliver, queue);
+		action = NULL;
+	}
 }
 
 
@@ -196,6 +158,8 @@ void queue_notify(queue_t *queue, void *pserver)
 	
 	assert(queue);
 	assert(server);
+
+	assert(0);
 }
 
 
@@ -520,23 +484,27 @@ void queue_deliver(queue_t *queue)
 			}
 		}
 		else {
-			// This is a request.
+			// This is a request.  Even requests with NOREPLY work the same at this point, because we keep the message in memory until DELIVERED is received.
 	
 			// if we have a node that is ready, use it.
 			nq = ll_pop_head(&queue->nodes_ready);
 			if (nq) {
 				assert(nq->waiting <= nq->max);
 				
+				// add the node pointer to the message.
+				msg->target_node = nq->node;
+
 				// send the message to the node.
 				if (sysdata->verbose > 1) printf("queue_deliver: sending msg to node:%d\n", nq->node->handle);
 				sendMessage(nq->node, msg);
-		
+
 				// increment the 'waiting' count for the nq.
 				nq->waiting ++;
-				assert(nq->waiting > 0 && nq->waiting <= nq->max);
+				assert(nq->waiting > 0 && (nq->max == 0 || nq->waiting <= nq->max));
 		
 				// if the node has reached the max number of consumed messages, then it
-				// will be put in the busy list.
+				// will be put in the busy list.  Otherwise it will be put in the tail
+				// of the ready list where it can receive more.
 				if (nq->waiting >= nq->max) {
 					ll_push_tail(&queue->nodes_busy, nq);
 				}

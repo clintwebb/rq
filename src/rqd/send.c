@@ -41,7 +41,6 @@ void sendMessage(node_t *node, message_t *msg)
 	assert(node->build->length == 0);
 
 	assert(msg->data);
-	assert(msg->target_node);
 	assert(msg->queue);
 
 
@@ -58,6 +57,10 @@ void sendMessage(node_t *node, message_t *msg)
 		// We are sending a broadcast message
 		assert(BIT_TEST(msg->flags, FLAG_MSG_NOREPLY));
 		assert(msg->id == 0);
+		assert(msg->target_node == NULL);
+	}
+	else {
+		assert(msg->target_node);
 	}
 
 	// add the commands to the out queue.

@@ -11,7 +11,7 @@
 
 #define FLAG_MSG_BROADCAST	0x01
 #define FLAG_MSG_NOREPLY		0x02
-#define FLAG_MSG_TIMEOUT    0x08
+#define FLAG_MSG_TIMEOUT    0x08		// set if there is a timeout specified.
 
 typedef int message_id_t;
 

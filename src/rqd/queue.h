@@ -55,6 +55,7 @@ void      queue_free(queue_t *queue);
 void      queue_addmsg(queue_t *queue, message_t *msg);
 int       queue_add_node(queue_t *queue, node_t *node, int max, int priority, unsigned int flags);
 
+void      queue_deliver(queue_t *queue);
 void      queue_notify(queue_t *queue, void *server);
 
 #endif
