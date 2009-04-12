@@ -8,6 +8,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -33,7 +34,7 @@ void server_init(server_t *server, system_data_t *sysdata)
 	}
 
 	server->active = 0;
-	server->nodelist = NULL;
+	ll_init(&server->nodelist);
 	server->shutdown = 0;
 }
 
@@ -49,7 +50,6 @@ static int new_socket(struct addrinfo *ai) {
 	// bind the socket, and then set the socket to non-blocking mode.
 	if ((sfd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol)) >= 0) {
 		if ((flags = fcntl(sfd, F_GETFL, 0)) < 0 || fcntl(sfd, F_SETFL, flags | O_NONBLOCK) < 0) {
-			perror("setting O_NONBLOCK");
 			close(sfd);
 			sfd = INVALID_HANDLE;
 		}
@@ -178,10 +178,11 @@ void server_cleanup(server_t *server)
 	// cleanup and free all of the allocated nodes which should all be cleaned out and idle now;
 	assert(server->active == 0);
 	assert(server->maxconns > 0);
-	assert(server->nodelist == NULL);
+	
+	ll_free(&server->nodelist);
 
 	// the queues should already have been cleared.
-	assert(server->sysdata->queues == NULL);
+	assert(ll_count(server->sysdata->queues) == 0);
 
 	server->sysdata = NULL;
 }
@@ -300,10 +301,7 @@ void server_event_handler(int hid, short flags, void *data)
 		event_add(&node->event, 0);
 
 		// add the node to the nodelist.
-		node->next = server->nodelist;
-		if (server->nodelist) server->nodelist->prev = node;
-		assert(node->prev == NULL);
-		server->nodelist = node;
+		ll_push_head(&server->nodelist, node);
 		node->refcount ++;
 
 		server->active ++;

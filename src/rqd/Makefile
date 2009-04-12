@@ -8,9 +8,9 @@ H_stats=stats.h
 H_data=data.h
 H_system_data=system_data.h /usr/include/rq.h
 H_message=message.h $(H_system_data)
-H_node=node.h $(H_message) $(H_data) $(H_system_data)
+H_node=node.h $(H_data) $(H_system_data)
 H_queue=queue.h $(H_node) $(H_message) $(H_system_data)
-H_server=server.h $(H_node) $(H_stats) $(H_queue) $(H_system_data)
+H_server=server.h $(H_system_data)
 H_commands=commands.h
 H_process=process.h
 H_send=send.h $(H_node) $(H_message)
@@ -23,12 +23,12 @@ OBJS=rqd.o daemon.o settings.o stats.o data.o server.o node.o queue.o commands.o
 # DEBUG_LIBS=-lefence
 DEBUG_LIBS=
 
-LIBS=-lrisp -levent -lexpbuf -lexpbufpool -lrispbuf -lrq -levactions -lmempool $(DEBUG_LIBS)
+LIBS=-lrisp -levent -lexpbuf -lexpbufpool -lrispbuf -lrq -levactions -lmempool -llinklist $(DEBUG_LIBS)
 
 rqd: $(OBJS)
 	gcc -o $@ $(OBJS) $(LIBS) $(ARGS)
 
-actions.o: actions.c $(H_actions) $(H_server)
+actions.o: actions.c $(H_actions) $(H_server) $(H_stats) $(H_queue)
 	gcc -c -o $@ actions.c $(ARGS)
 
 commands.o: commands.c $(H_commands) $(H_node) $(H_process)
@@ -52,7 +52,7 @@ process.o: process.c $(H_process) $(H_send) $(H_queue) $(H_message) $(H_actions)
 queue.o: queue.c $(H_queue) $(H_server) $(H_actions) $(H_send)
 	gcc -c -o $@ queue.c $(ARGS)
 
-rqd.o: rqd.c daemon.h $(H_actions) $(H_commands) $(H_server) $(H_settings) $(H_system_data)
+rqd.o: rqd.c daemon.h $(H_actions) $(H_commands) $(H_server) $(H_settings) $(H_stats) $(H_system_data)
 	gcc -c -o $@ rqd.c $(ARGS)
 
 send.o: send.c $(H_send) $(H_queue)

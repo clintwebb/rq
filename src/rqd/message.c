@@ -23,8 +23,6 @@ void message_init(message_t *msg, system_data_t *sysdata)
 	msg->source_node = NULL;
 	msg->target_node = NULL;
 	msg->queue = NULL;
-	msg->next = NULL;
-	msg->prev = NULL;
 	msg->sysdata = sysdata;
 }
 
@@ -36,16 +34,15 @@ void message_free(message_t *msg)
 	assert(msg != NULL);
 	assert(msg->sysdata != NULL);
 
+	// If we are freeing the message, there shouldn't be anything referencing it.
+	assert(msg->source_node == NULL);
+	assert(msg->target_node == NULL);
+	assert(msg->queue == NULL);
+
 	if (msg->data != NULL) {
 		expbuf_pool_return(msg->sysdata->bufpool, msg->data);
 		msg->data = NULL;
 	}
-
-	assert(msg->next == NULL && msg->prev == NULL);
-		
-	msg->source_node = NULL;
-	msg->target_node = NULL;
-	msg->queue = NULL;
 }
 
 //-----------------------------------------------------------------------------
@@ -113,7 +110,7 @@ void message_set_timeout(message_t *msg, int seconds)
 
 	// set the timeout value into the message structure.
 	assert(msg->timeout == 0);
-	assert(BIT_TEST(msg->flags, FLAG_MSG_TIMEOUT));
+	assert(BIT_TEST(msg->flags, FLAG_MSG_TIMEOUT) == 0);
 	msg->timeout = seconds;
 	BIT_SET(msg->flags, FLAG_MSG_TIMEOUT);
 

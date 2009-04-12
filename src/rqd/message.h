@@ -25,8 +25,6 @@ typedef struct __message_t {
 	void          *target_node;
 	void          *queue;
 	system_data_t *sysdata;
-	
-	struct __message_t *next, *prev;
 } message_t;
 
 
