@@ -16,11 +16,11 @@
 typedef int message_id_t;
 
 typedef struct __message_t {
-	message_id_t   id;
-	unsigned int   flags;
-	int            timeout;
+	message_id_t   id;						// ID given to the delivery node.
+	unsigned int   flags;					// flags that indicate various modes and settings.
+	int            timeout;				// timeout value to be counted down.
 	expbuf_t      *data;
-	message_id_t   source_id;
+	message_id_t   source_id;			// ID received from the source.
 	void          *source_node;
 	void          *target_node;
 	void          *queue;
@@ -31,6 +31,7 @@ typedef struct __message_t {
 
 void message_init(message_t *msg, system_data_t *sysdata);
 void message_free(message_t *msg);
+void message_delete(message_t *msg);
 
 void message_set_orignode(message_t *msg, void *node);
 void message_set_origid(message_t *msg, message_id_t id);

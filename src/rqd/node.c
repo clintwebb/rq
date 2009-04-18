@@ -40,7 +40,8 @@ void node_init(node_t *node, system_data_t *sysdata)
 	node->out     = expbuf_pool_new(sysdata->bufpool, DEFAULT_BUFFSIZE);
 	node->build   = expbuf_pool_new(sysdata->bufpool, 16);
 
-	ll_init(&node->msglist);
+	ll_init(&node->in_msg);
+	ll_init(&node->out_msg);
 
 	data_init(&node->data);
 	
@@ -100,7 +101,8 @@ void node_free(node_t *node)
 
 	// make sure that all the messages for this node have been processed first.
 	// And then free the memory that was used for the list.
-	ll_free(&node->msglist);
+	ll_free(&node->in_msg);
+	ll_free(&node->out_msg);
 
 	// make sure that this node has been removed from all consumer queues.
 	if (node->sysdata->queues)
@@ -136,7 +138,7 @@ static void node_closed(node_t *node)
 	if (node->sysdata->queues) queue_cancel_node(node);
 
 	// we need to remove (return) any messages that this node was processing.
-	while ((msg = ll_pop_head(&node->msglist)) != NULL) {
+	while ((msg = ll_pop_head(&node->out_msg)) != NULL) {
 		// we have a message that we need to deal with.
 
 		// if this node was a destination for the message then we need to return a FAILURE to the source.
@@ -148,6 +150,13 @@ static void node_closed(node_t *node)
 		// detatch message from node, and the node from the message and then set an action to deal with the message.
 		assert(0);
 	}
+	
+	// we need to do something with the messages that this node is waiting replies for.,
+	while ((msg = ll_pop_head(&node->in_msg)) != NULL) {
+		// we have a message that we need to deal with.
+		assert(0);
+	}
+
 	
 	// need to cancel the event.
 	if (BIT_TEST(node->flags, FLAG_NODE_ACTIVE)) {
@@ -183,22 +192,15 @@ static void node_read(node_t *node)
 
 	empty = 0;
 	while (empty == 0) {
-		assert(node->in->length == 0);
-		assert(node->in->max > 0);
-		assert(node->in->data != NULL);
+		assert(node->in->length == 0 && node->in->max > 0 && node->in->data != NULL);
 		assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE));
-		assert(node->handle != INVALID_HANDLE);
-		assert(node->handle > 0);
-		
-		if (node->sysdata->verbose) printf("node(%d) - reading data\n", node->handle);
+		assert(node->handle >= 0);
 		
 		res = read(node->handle, node->in->data, node->in->max);
 		if (res > 0) {
 			assert(res <= node->in->max);
 			stats->in_bytes += res;
 			node->in->length = res;
-
-			if (node->sysdata->verbose > 1) printf("node(%d) - data received (%d)\n", node->handle, res);
 
 			// if we pulled out the max we had avail in our buffer, that means we can pull out more at a time.
 			if (res == node->in->max) {
@@ -243,7 +245,7 @@ static void node_read(node_t *node)
 			empty = 1;
 			
 			if (res == 0) {
-				if (node->sysdata->verbose)
+				if (node->sysdata->verbose > 1)
 					printf("Node[%d] closed while reading.\n", node->handle);
 				node_closed(node);
 				assert(empty != 0);
@@ -251,7 +253,7 @@ static void node_read(node_t *node)
 			else {
 				assert(res == -1);
 				if (errno != EAGAIN && errno != EWOULDBLOCK) {
-					if (node->sysdata->verbose)
+					if (node->sysdata->verbose > 1)
 						printf("Node[%d] closed while reading- because of error: %d\n", node->handle, errno);
 					close(node->handle);
 					node_closed(node);
@@ -309,14 +311,14 @@ static void node_write(node_t *node)
 		}
 	}
 	else if (res == 0) {
-		printf("Node[%d] closed while writing.\n", node->handle);
+		if (node->sysdata->verbose > 1) printf("Node[%d] closed while writing.\n", node->handle);
 		node_closed(node);
 		assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE) == 0);
 	}
 	else {
 		assert(res == -1);
 		if (errno != EAGAIN && errno != EWOULDBLOCK) {
-			printf("Node[%d] closed while writing - because of error: %d\n", node->handle, errno);
+			if (node->sysdata->verbose > 1) printf("Node[%d] closed while writing - because of error: %d\n", node->handle, errno);
 			close(node->handle);
 			node_closed(node);
 			assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE) == 0);
@@ -377,7 +379,7 @@ void node_write_now(node_t *node, int length, char *data)
 			}
 		}
 		else if (res == 0) {
-			if (node->sysdata->verbose)
+			if (node->sysdata->verbose > 1)
 				printf("Node[%d] closed while writing.\n", node->handle);
 			node->handle = INVALID_HANDLE;
 			node_closed(node);
@@ -386,7 +388,7 @@ void node_write_now(node_t *node, int length, char *data)
 		else {
 			assert(res == -1);
 			if (errno != EAGAIN && errno != EWOULDBLOCK) {
-				if (node->sysdata->verbose)
+				if (node->sysdata->verbose > 1)
 					printf("Node[%d] closed while writing - because of error: %d\n", node->handle, errno);
 				close(node->handle);
 				node->handle = INVALID_HANDLE;
@@ -406,23 +408,15 @@ void node_event_handler(int hid, short flags, void *data)
 	node_t *node;
 	node = (node_t *) data;
 
-
 	assert(hid >= 0);
 	assert(node != NULL);
 	assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE));
 	assert(node->sysdata != NULL);
 	
-	if (node->sysdata->verbose > 1)
-		printf("node_event_handler: hid=%d, node->handle=%d, flags=%d\n", hid, node->handle, flags);
-
 	assert(node->handle == hid);
 	
 	if (flags & EV_READ) {
-		if (node->sysdata->verbose)
-			printf("Reading from socket.  hid=%d, flags=%u\n", node->handle, flags);
 		node_read(node);
-		if (node->sysdata->verbose)
-			printf("Finished Reading\n");
 	}
 		
 	if ((flags & EV_WRITE) && BIT_TEST(node->flags, FLAG_NODE_ACTIVE)) {

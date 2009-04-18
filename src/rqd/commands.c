@@ -53,85 +53,34 @@ void cmdInvalid(void *base, void *data, risp_length_t len)
 void cmdClear(void *base) 
 {
  	node_t *node = (node_t *) base;
+
  	assert(node != NULL);
+ 	assert(node->handle >= 0);
+ 	
+	data_clear(&node->data);
+ 	
  	assert(node->sysdata != NULL);
 	assert(node->sysdata->verbose >= 0);
-	data_clear(&node->data);
 	if (node->sysdata->verbose > 1) printf("node:%d CLEAR\n", node->handle);
 }
 
 
-// This callback function is called when the CMD_EXECUTE command is received.  
-// It should look at the data received so far, and figure out what operation 
-// needs to be done on that data.  Since this is a simulation, and our 
-// protocol doesn't really do anything useful, we will not really do much in 
-// this example.   
-void cmdExecute(void *base) 
-{
-	node_t *node = (node_t *) base;
- 	assert(node != NULL);
-	assert(node->sysdata != NULL);
-	assert(node->sysdata->verbose >= 0);
-	
- 	assert(node->sysdata->stats != NULL);
-	if (node->sysdata->verbose > 1)
-		printf("node:%d EXECUTE (flags:%X, mask:%X)\n", node->handle, node->data.flags, node->data.mask);
-
-	if (BIT_TEST(node->data.flags, DATA_FLAG_REQUEST)) {
-		processRequest(node);
-	}
-	else if (BIT_TEST(node->data.flags, DATA_FLAG_REPLY)) {
-		processReply(node);
-	}
-	else if (BIT_TEST(node->data.flags, DATA_FLAG_BROADCAST) && BIT_TEST(node->data.flags, DATA_FLAG_NOREPLY)) {
-		// if we receive a BROADCAST, but not a REQUEST, then it is not a requesst, and should also not expect a reply.
-		assert(! BIT_TEST(node->data.flags, DATA_FLAG_REQUEST));
-// 		printf("node:%d Processing broadcast message.\n", node->handle);
-		processBroadcast(node);
-	}
-	else if (BIT_TEST(node->data.flags, DATA_FLAG_CONSUME)) {
-		processConsume(node);
-	}
-	else if (BIT_TEST(node->data.flags, DATA_FLAG_CANCEL_QUEUE)) {
-		processCancelQueue(node);
-	}
-	else if (BIT_TEST(node->data.flags, DATA_FLAG_CLOSING)) {
-		processClosing(node);
-	}
-	else if (BIT_TEST(node->data.flags, DATA_FLAG_SERVER_FULL)) {
-		processServerFull(node);
-	}
-	else if (BIT_TEST(node->data.flags, DATA_FLAG_CONTROLLER)) {
-		processController(node);
-	}
-	else if (BIT_TEST(node->data.mask, DATA_MASK_QUEUEID) && BIT_TEST(node->data.mask, DATA_MASK_QUEUE)) {
-		processQueueLink(node);
-	}
-	else {
-		// while primary development is occuring will leave this assert in to catch some simple programming issues.  However, once this goes to production, this will need to be removed, because we want to ignore actions taht we dont understand.  This could mean that a new protocol has a command we dont know how to understand.  So we ignore it.
-		
-		if (node->sysdata->verbose)
-			printf("node:%d EXECUTE failed (flags:%x, mask:%x)\n",
-				node->handle, node->data.flags, node->data.mask);
-		
-		assert(0);
-	}
-}
 
 void cmdRequest(void *base)
 {
 	node_t *node = (node_t *) base;
+
  	assert(node != NULL);
+ 	assert(node->handle >= 0);
+
+ 	// clear any flags that are not compatible with this command.
+ 	BIT_CLEAR(node->data.flags, DATA_FLAG_BROADCAST | DATA_FLAG_REPLY | DATA_FLAG_DELIVERED);
+ 	
+ 	// set our specific flag.
+	BIT_SET(node->data.flags, DATA_FLAG_REQUEST);
+
 	assert(node->sysdata != NULL);
 	assert(node->sysdata->verbose >= 0);
-
- 	// ensure only the flags that are valid.
- 	node->data.flags &= (DATA_FLAG_BROADCAST | DATA_FLAG_NOREPLY);
- 	// set our specific flag.
-	node->data.flags |= DATA_FLAG_REQUEST;
-	// ensure only the legal data is used.
-	node->data.mask &= (DATA_MASK_ID | DATA_MASK_TIMEOUT | DATA_MASK_QUEUEID | DATA_MASK_QUEUE | DATA_MASK_PAYLOAD);
-
 	if (node->sysdata->verbose > 1)
 		printf("node:%d REQUEST (flags:%x, mask:%x)\n", node->handle, node->data.flags, node->data.mask);
 }
@@ -178,16 +127,18 @@ void cmdBroadcast(void *base)
 void cmdNoReply(void *base)
 {
 	node_t *node = (node_t *) base;
+ 	
  	assert(node != NULL);
-	assert(node->sysdata != NULL);
-	assert(node->sysdata->verbose >= 0);
+ 	assert(node->handle >= 0);
 
- 	// ensure only the flags that are valid.
- 	node->data.flags &= (DATA_FLAG_REQUEST | DATA_FLAG_BROADCAST);
+ 	// Clear any flags that are not compatible.
+//  	BIT_CLEAR(node->data.flags, DATA_FLAG_REPLY | DATA_FLAG_CONSUME | DATA_FLAG_CANCEL_QUEUE | DATA_FLAG_CLOSING | DATA_FLAG_SERVER_FULL | DATA_FLAG_RECEIVED | DATA_FLAG_DELIVERED | DATA_FLAG_EXCLUSIVE);
+ 	
  	// set our specific flag.
-	node->data.flags |= DATA_FLAG_NOREPLY;
+	BIT_SET(node->data.flags, DATA_FLAG_NOREPLY);
+	
 	// ensure only the legal data is used.
-	node->data.mask &= (DATA_MASK_ID | DATA_MASK_TIMEOUT | DATA_MASK_QUEUEID | DATA_MASK_QUEUE | DATA_MASK_PAYLOAD);
+// 	BIT_CLEAR(node->data.mask, DATA_MASK_MAX);
 
 	assert(node->sysdata != NULL);
 	assert(node->sysdata->verbose >= 0);
@@ -257,15 +208,18 @@ void cmdCancelQueue(void *base)
 void cmdId(void *base, risp_int_t value)
 {
 	node_t *node= (node_t *) base;
+
  	assert(node != NULL);
  	assert(value > 0);
+ 	assert(node->handle >= 0);
+
+	BIT_SET(node->data.mask, DATA_MASK_ID);
 	node->data.id = value;
-	node->data.mask |= (DATA_MASK_ID);
 	
 	assert(node->sysdata != NULL);
 	assert(node->sysdata->verbose >= 0);
 	if (node->sysdata->verbose > 1)
-		printf("node:%d ID (%d)\n", node->handle, value);
+		printf("node:%d ID (%d) (flags:%x, mask:%x)\n", node->handle, value, node->data.flags, node->data.mask);
 }
 
 void cmdTimeout(void *base, risp_int_t value)
@@ -368,14 +322,17 @@ void cmdReceived(void *base)
 void cmdDelivered(void *base)
 {
 	node_t *node = (node_t *) base;
+ 	
  	assert(node != NULL);
 
  	// ensure only the flags that are valid.
- 	node->data.flags &= (DATA_FLAG_DELIVERED);
+	BIT_CLEAR(node->data.flags, DATA_FLAG_REQUEST | DATA_FLAG_REPLY | DATA_FLAG_BROADCAST | DATA_FLAG_NOREPLY);
+
  	// set our specific flag.
-	node->data.flags |= DATA_FLAG_DELIVERED;
+ 	BIT_SET(node->data.flags, DATA_FLAG_DELIVERED);
+ 	
 	// ensure only the legal data is used.
-	node->data.mask &= (DATA_MASK_ID | DATA_MASK_QUEUEID | DATA_MASK_QUEUE);
+	BIT_CLEAR(node->data.mask, DATA_MASK_PRIORITY | DATA_MASK_TIMEOUT | DATA_MASK_PAYLOAD);
 
 	assert(node->sysdata != NULL);
 	assert(node->sysdata->verbose >= 0);
@@ -385,3 +342,62 @@ void cmdDelivered(void *base)
 
 
 
+
+// This callback function is called when the CMD_EXECUTE command is received.  
+// It should look at the data received so far, and figure out what operation 
+// needs to be done on that data.  Since this is a simulation, and our 
+// protocol doesn't really do anything useful, we will not really do much in 
+// this example.   
+void cmdExecute(void *base) 
+{
+	node_t *node = (node_t *) base;
+ 	assert(node != NULL);
+	assert(node->sysdata != NULL);
+	assert(node->sysdata->verbose >= 0);
+	
+ 	assert(node->sysdata->stats != NULL);
+	if (node->sysdata->verbose > 1)
+		printf("node:%d EXECUTE (flags:%X, mask:%X)\n", node->handle, node->data.flags, node->data.mask);
+
+	if (BIT_TEST(node->data.flags, DATA_FLAG_REQUEST)) {
+		processRequest(node);
+	}
+	else if (BIT_TEST(node->data.flags, DATA_FLAG_REPLY)) {
+		processReply(node);
+	}
+	else if (BIT_TEST(node->data.flags, DATA_FLAG_DELIVERED)) {
+		processDelivered(node);
+	}
+	else if (BIT_TEST(node->data.flags, DATA_FLAG_BROADCAST) && BIT_TEST(node->data.flags, DATA_FLAG_NOREPLY)) {
+		// if we receive a BROADCAST, but not a REQUEST, then it is not a requesst, and should also not expect a reply.
+		assert(! BIT_TEST(node->data.flags, DATA_FLAG_REQUEST));
+		processBroadcast(node);
+	}
+	else if (BIT_TEST(node->data.flags, DATA_FLAG_CONSUME)) {
+		processConsume(node);
+	}
+	else if (BIT_TEST(node->data.flags, DATA_FLAG_CANCEL_QUEUE)) {
+		processCancelQueue(node);
+	}
+	else if (BIT_TEST(node->data.flags, DATA_FLAG_CLOSING)) {
+		processClosing(node);
+	}
+	else if (BIT_TEST(node->data.flags, DATA_FLAG_SERVER_FULL)) {
+		processServerFull(node);
+	}
+	else if (BIT_TEST(node->data.flags, DATA_FLAG_CONTROLLER)) {
+		processController(node);
+	}
+	else if (BIT_TEST(node->data.mask, DATA_MASK_QUEUEID) && BIT_TEST(node->data.mask, DATA_MASK_QUEUE)) {
+		processQueueLink(node);
+	}
+	else {
+		// while primary development is occuring will leave this assert in to catch some simple programming issues.  However, once this goes to production, this will need to be removed, because we want to ignore actions taht we dont understand.  This could mean that a new protocol has a command we dont know how to understand.  So we ignore it.
+		
+		if (node->sysdata->verbose)
+			printf("node:%d EXECUTE failed (flags:%x, mask:%x)\n",
+				node->handle, node->data.flags, node->data.mask);
+		
+		assert(0);
+	}
+}

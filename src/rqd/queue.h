@@ -16,7 +16,6 @@
 
 #define QUEUE_FLAG_EXCLUSIVE 0x0001
 
-typedef int queue_id_t;
 
 typedef struct {
 	char *name;
@@ -57,6 +56,7 @@ int       queue_add_node(queue_t *queue, node_t *node, int max, int priority, un
 
 void      queue_deliver(queue_t *queue);
 void      queue_notify(queue_t *queue, void *server);
+void      queue_msg_done(queue_t *queue, node_t *node);
 
 #endif
 

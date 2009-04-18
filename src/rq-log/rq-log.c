@@ -5,33 +5,24 @@
 //-----------------------------------------------------------------------------
 
 
-#include <risp.h>
-#include <expbuf.h>
-#include <rispbuf.h>
-#include <rq.h>
 #include "rq-log.h"
 
 // includes
 #include <assert.h>
-// #include <errno.h>
 #include <event.h>
-// #include <fcntl.h>
-// #include <netdb.h>
-// #include <pwd.h>
+#include <expbuf.h>
+#include <risp.h>
+#include <rispbuf.h>
+#include <rq.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-// #include <sys/resource.h>
-// #include <sys/socket.h>
-// #include <sys/time.h>
-// #include <sys/types.h>
 #include <unistd.h>
 
 
 #define PACKAGE						"rq-log"
 #define VERSION						"1.0"
-
 
 
 
@@ -58,9 +49,13 @@ typedef struct {
 	char *levelsqueue;
 } settings_t;
 
+#define LOG_DATA_MASK_LEVEL 1
+#define LOG_DATA_MASK_TIME  2
+#define LOG_DATA_MASK_TEXT  4
+
 
 typedef struct {
-	rq_t              *rq;
+	rq_t              rq;
 	settings_t        *settings;
 	risp_t            *risp;
 	int                logfile;
@@ -69,14 +64,10 @@ typedef struct {
 	// data received
 	risp_command_t  op;
 	int filter;
-	struct {
-		bool     set;
-		int      value;
-	} level, time;
-	struct {
-		bool     set;
-		expbuf_t value;
-	} text;
+
+	unsigned int mask;
+	int level, time;
+	expbuf_t text;
 
 	rq_message_t *req;
 } control_t;
@@ -133,8 +124,9 @@ static void sig_handler(const int sig) {
 void processSetLevel(control_t *ptr)
 {
 	assert(ptr != NULL);
-	if (ptr->level.set == true) {
-		ptr->filter = ptr->level.value;
+	
+	if (BIT_TEST(ptr->mask, LOG_DATA_MASK_LEVEL)) {
+		ptr->filter = ptr->level;
 	}
 }
 
@@ -142,11 +134,13 @@ void processSetLevel(control_t *ptr)
 void processText(control_t *ptr)
 {
 	assert(ptr != NULL);
-	assert(ptr->text.set == true);
-	assert(ptr->text.value.length > 0);
+	assert(BIT_TEST(ptr->mask, LOG_DATA_MASK_TEXT));
+	assert(ptr->text.length > 0);
+
+	printf("LOG: %s\n", expbuf_string(&ptr->text));
 	
 	// if we dont have a file open, then we will need to open one.
-	assert(0);
+// 	assert(0);
 	
 	// write the text entry to the file.
 
@@ -187,9 +181,7 @@ void cmdClear(control_t *ptr)
  	assert(ptr != NULL);
  	
 	ptr->op = LOG_CMD_NOP;
-	ptr->level.set = false;
-	ptr->time.set = false;
-	ptr->text.set = false;
+	ptr->mask = 0;
  	
  	if (ptr->settings->verbose > 1) printf("node: CLEAR\n");
 }
@@ -227,7 +219,7 @@ void cmdSetLevel(control_t *ptr)
 {
  	assert(ptr != NULL);
 	ptr->op = LOG_CMD_SETLEVEL;
-	printf("node: SETLEVEL\n");
+	if (ptr->settings->verbose > 1) printf("node: SETLEVEL\n");
 }
 
 void cmdLevel(control_t *ptr, risp_int_t value)
@@ -235,20 +227,20 @@ void cmdLevel(control_t *ptr, risp_int_t value)
  	assert(ptr != NULL);
  	assert(value >= 0 && value < 256);
 
-	ptr->level.value = value;
-	ptr->level.set = true;
+	ptr->level = value;
+	BIT_SET(ptr->mask, LOG_DATA_MASK_LEVEL);
 	
-	printf("node: LEVEL %d\n", value);
+	if (ptr->settings->verbose > 1) printf("node: LEVEL %d\n", value);
 }
 
 void cmdTime(control_t *ptr, risp_int_t value)
 {
  	assert(ptr != NULL);
 
-	ptr->time.value = value;
-	ptr->time.set = true;
+	ptr->time = value;
+	BIT_SET(ptr->mask, LOG_DATA_MASK_TIME);
 	
-	printf("node: TIME %d\n", value);
+	if (ptr->settings->verbose > 1) printf("node: TIME %d\n", value);
 }
 
 void cmdText(control_t *ptr, risp_length_t length, risp_char_t *data)
@@ -257,11 +249,11 @@ void cmdText(control_t *ptr, risp_length_t length, risp_char_t *data)
 	assert(length > 0);
 	assert(data != NULL);
 	
-	expbuf_set(&ptr->text.value, data, length);
-	ptr->text.set = true;
+	expbuf_set(&ptr->text, data, length);
+	BIT_SET(ptr->mask, LOG_DATA_MASK_TEXT);
 	ptr->op = LOG_CMD_TEXT;
 	
-	printf("node: TEXT <%d>\n", length);
+	if (ptr->settings->verbose > 1) printf("node: TEXT <%d>\n", length);
 }
 
 
@@ -311,8 +303,7 @@ static void timeout_handler(void *arg) {
 		ptr->modified = 0;
 	}
 
-	assert(ptr->rq != NULL);
-	rq_settimeout(ptr->rq, 1000, timeout_handler, ptr);
+	rq_settimeout(&ptr->rq, 1000, timeout_handler, ptr);
 }
 
 
@@ -323,14 +314,13 @@ void control_init(control_t *control)
 
 	control->settings = NULL;
 	control->risp = NULL;
-	control->rq = NULL;
 	control->logfile = INVALID_HANDLE;
 	control->modified = 0;
+
+	control->mask = 0;
+	expbuf_init(&control->text, 0);
 	
-	control->level.set = false;
-	control->time.set = false;
-	control->text.set = false;
-	expbuf_init(&control->text.value, 0);
+	rq_init(&control->rq);
 }
 
 void control_cleanup(control_t *control)
@@ -340,7 +330,8 @@ void control_cleanup(control_t *control)
 		close(control->logfile);
 		control->logfile = INVALID_HANDLE;
 	}
-	expbuf_free(&control->text.value);
+	expbuf_free(&control->text);
+	rq_cleanup(&control->rq);
 }
 
 
@@ -395,6 +386,7 @@ void process_args(settings_t *settings, int argc, char **argv)
 			case 'h':
 				usage();
 				exit(EXIT_SUCCESS);
+				break;
 			case 'v':
 				settings->verbose++;
 				break;
@@ -436,31 +428,18 @@ void message_handler(rq_message_t *msg, void *arg)
 	control_t *control;
 
 	assert(msg != NULL);
+	assert(msg->type == RQ_TYPE_REQUEST);
+	assert(msg->noreply == 1);
+	
 	control = (control_t *) arg;
-
-	assert((msg->type == RQ_TYPE_REQUEST && msg->arg == NULL) || (msg->type == RQ_TYPE_REPLY));
-
-	assert(msg->request.length > 0);
-	assert(msg->request.data != NULL);
 	assert(control != NULL);
-
-	// since we are merely logging info, then we wont have any intermediate states.
+	
 	assert(control->req == NULL);
 	control->req = msg;
-	
-	assert(msg->reply.data == NULL);
-	assert(msg->reply.length == 0);
-
-	// we are only expecting broadcast types.  we are not setup to handle anything else.
-	assert(msg->broadcast != 0);
 
 	assert(control->risp != NULL);
-	processed = risp_process(control->risp, control, msg->request.length, msg->request.data);
-	assert(processed == msg->request.length);
-
-	// since all log messages should be sent with NOREPLY, then we will not need to reply to it.
-	assert(msg->reply.data == NULL);
-	assert(msg->reply.length == 0);
+	processed = risp_process(control->risp, control, msg->data.length, msg->data.data);
+	assert(processed == msg->data.length);
 
 	control->req = NULL;
 }
@@ -520,27 +499,23 @@ int main(int argc, char **argv)
 
 	
 
-	// Create the RQ object.   This will be used to communicate with the rq controller. 
-	control->rq = (rq_t *) malloc(sizeof(rq_t));
-	assert(control->rq);
-	rq_init(control->rq);
 
 	control->req = NULL;
 
 	if (control->settings->verbose) printf("Initialising the event system.\n");
 	assert(main_event_base == NULL);
 	main_event_base = event_init();
-	rq_setevbase(control->rq, main_event_base);
+	rq_setevbase(&control->rq, main_event_base);
 
 	if (control->settings->verbose) printf("Adding controller: %s:%d\n", control->settings->primary, control->settings->priport);
 	assert(control->settings->primary != NULL);
 	assert(control->settings->priport > 0);
-	rq_addcontroller(control->rq, control->settings->primary, control->settings->priport);
+	rq_addcontroller(&control->rq, control->settings->primary, control->settings->priport);
 
 	if (control->settings->secondary != NULL) {
 		if (control->settings->verbose) printf("Adding controller: %s:%d\n", control->settings->secondary, control->settings->secport);
 		assert(control->settings->secport > 0);
-		rq_addcontroller(control->rq, control->settings->secondary, control->settings->secport);
+		rq_addcontroller(&control->rq, control->settings->secondary, control->settings->secport);
 	}
 
 	// Initialise the risp system.
@@ -559,9 +534,8 @@ int main(int argc, char **argv)
 	// connect to other controller.
 	assert(control->settings->primary != NULL);
 	assert(control != NULL);
-	assert(control->rq != NULL);
 	if (control->settings->verbose) printf("Connecting to controller\n");
-	if (rq_connect(control->rq) != 0) {
+	if (rq_connect(&control->rq) != 0) {
 		fprintf(stderr, "Unable to connect to controller.\n");
 		exit(EXIT_FAILURE);
 	}
@@ -570,9 +544,8 @@ int main(int argc, char **argv)
 	// tell RQ that we want a timeout event after 1000 miliseconds (1 second);
 	// this is a one-time timeout, so when handling it, will need to set another.
 	assert(control != NULL);
-	assert(control->rq != NULL);
 	if (control->settings->verbose) printf("Setting 1 second timeout\n");
-	rq_settimeout(control->rq, 1000, timeout_handler, control);
+	rq_settimeout(&control->rq, 1000, timeout_handler, control);
 	
 	
 	// connect to the specific queues that we want to connect to.  We wont use a
@@ -580,14 +553,13 @@ int main(int argc, char **argv)
 	// queues.  We can do this because both queues use compatible message
 	// structures.
 	assert(control != NULL);
-	assert(control->rq != NULL);
 	assert(control->settings != NULL);
 	assert(control->settings->queue != NULL);
 	if (control->settings->verbose) printf("Consuming queue: %s\n", control->settings->queue);
 
-	rq_consume(control->rq, control->settings->queue, 0, RQ_PRIORITY_NORMAL, 1, message_handler, control);
+	rq_consume(&control->rq, control->settings->queue, 2, RQ_PRIORITY_NORMAL, 1, message_handler, control);
 	if (control->settings->levelsqueue != NULL) {
-		rq_consume(control->rq, control->settings->levelsqueue, 0, RQ_PRIORITY_NONE, 0, message_handler, control);
+		rq_consume(&control->rq, control->settings->levelsqueue, 0, RQ_PRIORITY_NONE, 0, message_handler, control);
 	}
 	
 	// enter the processing loop.  This function will not return until there is
@@ -595,9 +567,8 @@ int main(int argc, char **argv)
 	// everything needs to be setup and running before this point.  Once inside
 	// the rq_process function, everything is initiated by the RQ event system.
 	assert(control != NULL);
-	assert(control->rq != NULL);
 	if (control->settings->verbose) printf("Starting RQ Process\n");
-	rq_process(control->rq);
+	rq_process(&control->rq);
 
 	if (control->settings->verbose) printf("\nShutting down\n");
 
@@ -606,13 +577,6 @@ int main(int argc, char **argv)
 	assert(control->risp != NULL);
 	risp_shutdown(control->risp);
 	control->risp = NULL;
-
-	// cleanup the RQ stuff.
-	assert(control->rq != NULL);
-	rq_cleanup(control->rq);
-	free(control->rq);
-	control->rq = NULL;
-
 
 	// remove the PID file if we're a daemon
 	if (control->settings->daemonize && control->settings->pid_file != NULL) {

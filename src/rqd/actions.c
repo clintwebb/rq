@@ -165,9 +165,12 @@ void ah_node_shutdown(action_t *action)
 		BIT_SET(node->flags, FLAG_NODE_CLOSING);
 	}
 
+	// need to pay more attention to the lists here.  Something has closed, so one of the lists is no longer valid, need to determine what.
+	assert(0);
+
 	// We are still connected to the node, so we need to put a timeout on the
 	// messages the node is servicing.
-	if (node->handle != INVALID_HANDLE && ll_count(&node->msglist)) {
+	if (node->handle != INVALID_HANDLE && (ll_count(&node->in_msg) > 0 || ll_count(&node->out_msg) > 0)) {
 
 		// need to set a timeout on the messages.
 		assert(0);
@@ -181,7 +184,7 @@ void ah_node_shutdown(action_t *action)
 		// we are not connected to the node anymore, so we cannot service the
 		// messages that we were waiting for, so we need to return replies on
 		// undelivery to the source nodes.
-		if (node->handle == INVALID_HANDLE && ll_count(&node->msglist) > 0) {
+		if (node->handle == INVALID_HANDLE && (ll_count(&node->in_msg) > 0 || ll_count(&node->out_msg)>0)) {
 			
 			// send undelivered notices to the owners of all the pending messages
 			// or return the message to the queue.
@@ -191,7 +194,8 @@ void ah_node_shutdown(action_t *action)
 		// if we have done all we need to do, but still have a valid handle, then we should close it, and delete the event.
 		if (node->handle != INVALID_HANDLE && node->out->length == 0) {
 			assert(node->out->length == 0);
-			assert(ll_count(&node->msglist) == 0);
+			assert(ll_count(&node->in_msg) == 0);
+			assert(ll_count(&node->out_msg) == 0);
 			assert(node->handle > 0);
 			close(node->handle);
 			node->handle = INVALID_HANDLE;
@@ -274,52 +278,15 @@ void ah_queue_shutdown(action_t *action)
 // output this needs to run so that it can keep the counters under control.
 void ah_stats(action_t *action)
 {
-	int clients;
-	int queues;
-	system_data_t *sysdata;
 	stats_t *stats;
-	server_t *server;
-	
-	assert(action != NULL);
-	assert(action->shared != NULL);
-	assert(action->data != NULL);
+	system_data_t *sysdata;
 
-	sysdata = action->shared;
+	assert(action && action->data && action->shared);
 	stats = action->data;
+	sysdata = action->shared;
+	
+	stats_display(stats, sysdata);
 
-	assert(sysdata->server != NULL);
-	server = sysdata->server;
-
-	assert(server->active >= 0);
-	clients = server->active;
-
-	queues = ll_count(sysdata->queues);
-
-	assert(stats != NULL);
-	if (stats->in_bytes || stats->out_bytes || stats->requests || stats->replies || stats->broadcasts) {
-
-		assert(sysdata->actpool);
-
-		if (sysdata->verbose)
-			printf("Bytes [%u/%u], Clients [%u], Requests [%u], Replies [%u], Broadcasts [%u], Queues[%u], ActPool[%u/%u]\n",
-				stats->in_bytes,
-				stats->out_bytes,
-				clients,
-				stats->requests,
-				stats->replies,
-				stats->broadcasts,
-				queues,
-				action_pool_active(sysdata->actpool),
-				action_pool_inactive(sysdata->actpool));
-		
-		stats->in_bytes = 0;
-		stats->out_bytes = 0;
-		stats->requests = 0;
-		stats->replies = 0;
-		stats->broadcasts = 0;
-	}
-
-	assert(stats != NULL);
 	if (stats->shutdown == 0) {
 		// since we are not shutting down, schedule the action again.
 		action_reset(action);
@@ -332,7 +299,11 @@ void ah_stats(action_t *action)
 
 
 //-----------------------------------------------------------------------------
-// 
+// This action is created when a message is provided that has a timeout.  This
+// event will fire every second, decrementing the counter of the message.  If
+// the countdown gets to 0, then it will initiate a 'return' of the failed
+// message.
+
 void ah_message(action_t *action)
 {
 	assert(action);
@@ -340,89 +311,7 @@ void ah_message(action_t *action)
 }
 
 
-//-----------------------------------------------------------------------------
-// When a node consumes a queue for the first time, we need to send a consume
-// request to other controllers.
-void ah_queue_notify(action_t *action)
-{
-	system_data_t *sysdata;
-	queue_t *queue;
-	server_t *server;
-	node_t *node;
-	void *next;
-	
-	assert(action);
-	
-	assert(action->shared);
-	sysdata = action->shared;
-
-	assert(action->data);
-	queue = action->data;
-	assert(queue->qid > 0);
-	assert(queue->name != NULL);
-
-	assert(sysdata->server);
-	server = sysdata->server;
-
-	// now that we have our server object, we can go thru the list of nodes.  If
-	// any of them are controllers, then we need to send a consume request.
-	next = ll_start(&server->nodelist);
-	node = ll_next(&server->nodelist, &next);
-	while (node) {
-		if (BIT_TEST(node->flags, FLAG_NODE_CONTROLLER)) {
-			sendConsume(node, queue->name, 1, QUEUE_LOW_PRIORITY);
-		}
-		
-		node = ll_next(&server->nodelist, &next);
-	}
-
-	// return the action to the action pool.
-	action_pool_return(action);
-}
-
-// When a message is added to the queue, 
-void ah_queue_deliver(action_t *action)
-{
-	queue_t *q;
-
-	assert(action);
-	q = action->data;
-	assert(q);
-
-	queue_deliver(q);
-
-	// return the action to the action pool.
-	action_pool_return(action);	
-}
 
 
-//-----------------------------------------------------------------------------
-// This action is created when a message is provided that has a timeout.  This
-// event will fire every second, decrementing the counter of the message.  If
-// the countdown gets to 0, then it will initiate a 'return' of the failed
-// message.
-void ah_msg_countdown(action_t *action)
-{
-	assert(action);
-
-	assert(0);
-}
-
-
-//-----------------------------------------------------------------------------
-// This action is used to delete a message.  It will only delete the message if
-// it is safe to do so.  If it cannot delete the message, it will simply exit,
-// returning the action.  When other activities occur that might allow for the
-// message to be deleted, it will raise the action again.
-void ah_msg_delete(action_t *action)
-{
-	assert(action);
-
-	assert(0);
-
-	// return the action to the action pool.
-	action_pool_return(action);	
-	
-}
 
 

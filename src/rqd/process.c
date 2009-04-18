@@ -1,13 +1,12 @@
 // process.c
 
-#include "actions.h"
-#include "process.h"
-#include "send.h"
-#include "queue.h"
 #include "message.h"
+#include "process.h"
+#include "queue.h"
+#include "send.h"
+#include "stats.h"
 
 #include <assert.h>
-#include <evactions.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -19,18 +18,19 @@ void processRequest(node_t *node)
 {
 	message_t *msg;
 	queue_t *q, *tmp;
+	stats_t *stats;
 
 	assert(node);
 	assert(node->sysdata);
 	assert(node->sysdata->msgpool);
 	assert(node->sysdata->queues);
+	assert(node->sysdata->bufpool);
 
 	// This function should not be called for a Broadcast message.
 	assert(BIT_TEST(node->data.flags, DATA_FLAG_BROADCAST) == 0);
 
 	// make sure we have the required data.
-	if ((BIT_TEST(node->data.mask, DATA_MASK_QUEUE) || BIT_TEST(node->data.mask, DATA_MASK_QUEUEID))
-				&& BIT_TEST(node->data.mask, DATA_MASK_PAYLOAD)) {
+	if (BIT_TEST(node->data.mask, DATA_MASK_PAYLOAD) && (BIT_TEST(node->data.mask, DATA_MASK_QUEUE) || BIT_TEST(node->data.mask, DATA_MASK_QUEUEID))) {
 
 		// create the message object to hold the data.
 		msg = mempool_get(node->sysdata->msgpool, sizeof(message_t));
@@ -41,8 +41,7 @@ void processRequest(node_t *node)
 		message_init(msg, node->sysdata);
 
 		// assign the message payload.
-		assert(BIT_TEST(node->data.mask, DATA_MASK_PAYLOAD));
-		assert(node->sysdata->bufpool != NULL);
+		// TODO: Need to improve this so that we can detach a buffer and assign it, without having to do a copy.
 		msg->data = expbuf_pool_new(node->sysdata->bufpool, node->data.payload.length);
 		assert(msg->data);
 		expbuf_set(msg->data, node->data.payload.data, node->data.payload.length);
@@ -65,7 +64,8 @@ void processRequest(node_t *node)
 			}
 
 			// we are expecting a reply, so we will need to add this message to the node's msg list.
-			ll_push_head(&node->msglist, msg);
+			ll_push_head(&node->in_msg, msg);
+			assert(msg->source_node);
 		}
 		
 		if (BIT_TEST(node->data.mask, DATA_MASK_TIMEOUT)) {
@@ -101,7 +101,13 @@ void processRequest(node_t *node)
 		assert(ll_count(node->sysdata->queues) > 0);
 		
 		// add the message to the queue.
+
+		if (node->sysdata->verbose > 1) printf("processRequest: node:%d, msg_id:%d, q:%d\n", node->handle, msg->id, q->qid);
 		queue_addmsg(q, msg);
+
+		stats = node->sysdata->stats;
+		assert(stats);
+		stats->requests ++;
 	}
 	else {
 		// required data was not found.
@@ -272,8 +278,86 @@ void processBroadcast(node_t *node)
 
 void processDelivered(node_t *node)
 {
+	msg_id_t msgid;
+	message_t *tmp, *msg;
+	queue_t *q;
+	void *next;
+	
 	assert(node != NULL);
-	assert(0);
+
+	// get the messageID
+	assert(BIT_TEST(node->data.mask, DATA_MASK_ID));
+	msgid = node->data.id;
+	assert(msgid > 0);
+
+	if (node->sysdata->verbose > 1) printf("processDelivered.  Node:%d, msg_id:%d\n", node->handle, msgid);
+
+	// find message in node->out_msg
+	msg = NULL;
+	next = ll_start(&node->out_msg);
+	tmp = ll_next(&node->out_msg, &next);
+	while (tmp) {
+		assert(tmp->id > 0);
+		if (tmp->id == msgid) {
+			msg = tmp;
+			tmp = NULL;
+		}
+		else {
+			tmp = ll_next(&node->out_msg, &next);
+		}
+	}
+
+	if (msg == NULL) {
+		// didn't find the message that is being marked as delivered.
+		assert(0);
+	}
+	else {
+
+		if (BIT_TEST(msg->flags, FLAG_MSG_NOREPLY)) {
+			// message is NOREPLY,
+
+			if (node->sysdata->verbose > 1) printf("delivery(%d): Noreply.\n", msgid);
+		
+			// assert that message doesnt have source-node.
+			assert(msg->source_node == NULL);
+			
+			// tell the queue that the node has finished processing a message.  This
+			// will find the node, and remove it from the node_busy list.
+			assert(msg->queue);
+			assert(msg->target_node);
+			queue_msg_done(msg->queue, msg->target_node);
+			
+			// then remove from node->out_msg
+			assert(msg->target_node);
+			ll_remove(&node->out_msg, msg, NULL);
+			msg->target_node = NULL;
+			
+			// then remove from the queue->msg_proc list
+			assert(msg->queue);
+			q = msg->queue;
+			ll_remove(&q->msg_proc, msg, NULL);
+			msg->queue = NULL;
+			
+			// set action to remove the message.
+			message_delete(msg);
+
+			// if there are more messages in the queue, then we need to set an action to deliver them.
+			if (ll_count(&q->msg_pending) > 0) {
+			
+				if (node->sysdata->verbose > 1) printf("delivery(%d): setting delivery action.\n", msgid);
+				queue_deliver(q);
+			}
+			else {
+				if (node->sysdata->verbose > 1) printf("delivery(%d): no items to deliver.\n", msgid);
+			}
+		}
+		else {
+			// message is expecting a reply.
+
+			// mark the message as delivered.
+			assert(0);	
+		}
+	}	
 }
 
 

@@ -25,7 +25,7 @@ typedef struct {
 	expbuf_t *in, *waiting, *out, *build;
 	data_t data;
 	system_data_t *sysdata;
-	list_t msglist;
+	list_t in_msg, out_msg;
 	int refcount;
 } node_t ;
 

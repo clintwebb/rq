@@ -1,12 +1,10 @@
 
 
-#include "actions.h"
 #include "queue.h"
 #include "send.h"
 #include "server.h"
 
 #include <assert.h>
-#include <evactions.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,9 +14,9 @@
 // structure to keep track of the node that is consuming the queue
 typedef struct {
 	node_t *node;
-	short int max;				// maximum number of messages this node will process at a time.
 	short int priority;
-	short int waiting;
+	int max;				// maximum number of messages this node will process at a time.
+	int waiting;
 } node_queue_t;
 
 
@@ -91,6 +89,7 @@ queue_t * queue_get_id(list_t *queues, queue_id_t qid)
 }
 
 
+// This could be improved a little... when a queue is found, it is removed from the spot in the list, and placed at the top of the list.  That means that queues with higher activity are found first.
 queue_t * queue_get_name(list_t *queues, const char *qname)
 {
 	queue_t *q = NULL;
@@ -128,8 +127,6 @@ queue_t * queue_get_name(list_t *queues, const char *qname)
 // the best node to deliver it to, and deliver it.
 void queue_addmsg(queue_t *queue, message_t *msg)
 {
-	action_t *action;
-	
 	assert(queue);
 	assert(msg);
 	assert(queue->sysdata);
@@ -137,15 +134,12 @@ void queue_addmsg(queue_t *queue, message_t *msg)
 	assert(msg->queue == NULL);
 	msg->queue = queue;
 
-	// add the message to the queue, and then create an action (if this was the first )
+	// add the message to the queue
 	ll_push_tail(&queue->msg_pending, msg);
 
 	// if the only message in the list is the one we just added, then we will create an action to process it.
 	if (ll_count(&queue->msg_pending) == 1) {
-		assert(queue->sysdata->actpool);
-		action = action_pool_new(queue->sysdata->actpool);
-		action_set(action, 0, ah_queue_deliver, queue);
-		action = NULL;
+		queue_deliver(queue);
 	}
 }
 
@@ -156,26 +150,27 @@ void queue_notify(queue_t *queue, void *pserver)
 {
 	server_t *server = (server_t *) pserver;
 	
-	assert(queue);
-	assert(server);
+	node_t *node;
+	void *next;
+	
+	assert(queue->qid > 0);
+	assert(queue->name != NULL);
 
-	assert(0);
+	// now that we have our server object, we can go thru the list of nodes.  If
+	// any of them are controllers, then we need to send a consume request.
+	next = ll_start(&server->nodelist);
+	node = ll_next(&server->nodelist, &next);
+	while (node) {
+		
+		if (BIT_TEST(node->flags, FLAG_NODE_CONTROLLER)) {
+			assert(0);
+
+			sendConsume(node, queue->name, 1, QUEUE_LOW_PRIORITY);
+		}
+		
+		node = ll_next(&server->nodelist, &next);
+	}
 }
-
-
-// returns 0 if the queue does not need to be cleaned up, will return a !0 if it does.
-// int queue_cleanup_check(queue_t *queue)
-// {
-// 	assert(queue);
-// 
-// 	if (BIT_TEST(queue->flags, FLAG_QUEUE_DELETE)) {
-// 		assert(queue->flags == FLAG_QUEUE_DELETE);
-// 		return(!0);
-// 	}
-// 	else {
-// 		return(0);
-// 	}
-// }
 
 
 //-----------------------------------------------------------------------------
@@ -318,7 +313,6 @@ void queue_cancel_node(node_t *node)
 queue_t * queue_create(system_data_t *sysdata, char *qname)
 { 
 	queue_t *q;
-	action_t *action;
 
 	assert(sysdata);
 	assert(qname);
@@ -346,11 +340,9 @@ queue_t * queue_create(system_data_t *sysdata, char *qname)
 	// add the queue to the queue list.
 	ll_push_head(sysdata->queues, q);
 
-	// set an action so that we can notify other nodes (controllers) that we are consuming a queue.
-	assert(sysdata->actpool);
-	action = action_pool_new(sysdata->actpool);
-	action_set(action, 0, ah_queue_notify, q);
-	action = NULL;
+	// notify other nodes (controllers) that we are consuming a queue.
+	assert(sysdata->server);
+	queue_notify(q, sysdata->server);
 
 	return (q);
 }
@@ -425,11 +417,10 @@ int queue_add_node(queue_t *queue, node_t *node, int max, int priority, unsigned
 // messages in the queue, it will fire the action again.
 void queue_deliver(queue_t *queue)
 {
-	message_t *msg;
+	message_t *msg, *tmp;
 	system_data_t *sysdata;
 	node_queue_t *nq;
 	void *next;
-	action_t *delact;
 
 	assert(queue);
 	assert(queue->sysdata);
@@ -440,9 +431,13 @@ void queue_deliver(queue_t *queue)
 	// queue to process.
 	assert(ll_count(&queue->msg_pending) > 0);
 
+// 	printf("queue_deliver. q:%d, pending:%d\n", queue->qid, ll_count(&queue->msg_pending));
+
 	msg = ll_pop_head(&queue->msg_pending);
 	if (msg) {
 	
+// 		printf("queue_deliver. q:%d, pending:%d, msgid:%d\n", queue->qid, ll_count(&queue->msg_pending), msg->id);
+
 		// check the message to see if it is broadcast.
 		if (BIT_TEST(msg->flags, FLAG_MSG_BROADCAST)) {
 	
@@ -462,18 +457,15 @@ void queue_deliver(queue_t *queue)
 				while (nq) {
 					assert(nq->node);
 					if (sysdata->verbose > 1) printf("queue_deliver: sending broadcast msg to node:%d\n", nq->node->handle);
+					assert(msg->id == 0);
+					assert(msg->target_node == NULL);
 					sendMessage(nq->node, msg);
 					nq = ll_next(&queue->nodes_ready, &next);
 				}
 				
 				// since it is broadcast, we are not expecting a reply, so we can delete
 				// the message (it should already be removed from the node).
-				// create action to delete the message.
-				assert(sysdata->actpool);
-				delact = action_pool_new(sysdata->actpool);
-				assert(msg);
-				action_set(delact, 0, ah_msg_delete, msg);
-				delact = NULL;
+				message_delete(msg);
 			}
 			else {
 				// we dont have any available nodes so we wont send the broadcast yet.
@@ -489,15 +481,20 @@ void queue_deliver(queue_t *queue)
 			// if we have a node that is ready, use it.
 			nq = ll_pop_head(&queue->nodes_ready);
 			if (nq) {
-				assert(nq->waiting <= nq->max);
+				assert(nq->max == 0 || (nq->waiting <= nq->max));
 				
 				// add the node pointer to the message.
 				msg->target_node = nq->node;
 
+				// add the message to the target node's list.
+				tmp = ll_get_head(&nq->node->out_msg);
+				if (tmp) { msg->id = tmp->id + 1; }
+				else { msg->id = 1; }
+				ll_push_head(&nq->node->out_msg, msg);
+
 				// send the message to the node.
 				if (sysdata->verbose > 1) printf("queue_deliver: sending msg to node:%d\n", nq->node->handle);
 				sendMessage(nq->node, msg);
-
 				// increment the 'waiting' count for the nq.
 				nq->waiting ++;
 				assert(nq->waiting > 0 && (nq->max == 0 || nq->waiting <= nq->max));
@@ -505,7 +502,7 @@ void queue_deliver(queue_t *queue)
 				// if the node has reached the max number of consumed messages, then it
 				// will be put in the busy list.  Otherwise it will be put in the tail
 				// of the ready list where it can receive more.
-				if (nq->waiting >= nq->max) {
+				if (nq->max > 0 && nq->waiting >= nq->max) {
 					ll_push_tail(&queue->nodes_busy, nq);
 				}
 				else {
@@ -515,10 +512,53 @@ void queue_deliver(queue_t *queue)
 				// add the message to the msgproc list.
 				ll_push_head(&queue->msg_proc, msg);
 			}
+			else {
+				if (sysdata->verbose > 1)
+					printf("queue_deliver. q:%d, no nodes ready to consume.\n", queue->qid);
+
+				// we couldn't process the message, so put it back.
+				ll_push_head(&queue->msg_pending, msg);
+			}
 		}
 	}
 	else {
-		if (sysdata->verbose > 0)
+		if (sysdata->verbose > 1)
 			printf("queue_deliver: queue:%d, no messages waiting.\n", queue->qid);
 	}
 }
+
+
+// this function is called when a message has been delivered (in NOREPLY
+// mode), or a reply sent.  It is used to remove a node from the busy list if
+// it is marked as busy.
+void queue_msg_done(queue_t *queue, node_t *node)
+{
+	node_queue_t *nq;
+	void *next;
+	
+	assert(queue);
+	assert(node);
+
+
+	next = ll_start(&queue->nodes_busy);
+	nq = ll_next(&queue->nodes_busy, &next);
+	while (nq) {
+		assert(nq->node);
+		if (nq->node == node) {
+			// found it... in the busy list... so remove it from the busy list and add it back to the ready list.
+
+			assert(nq->waiting > 0);
+			nq->waiting --;
+			assert(nq->waiting >= 0);
+			
+			ll_remove(&queue->nodes_busy, nq, next);
+			ll_push_tail(&queue->nodes_ready, nq);
+			nq = NULL;
+		}
+		else {
+			nq = ll_next(&queue->nodes_busy, &next);
+		}
+	}
+}
+
+

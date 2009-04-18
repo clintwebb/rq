@@ -139,7 +139,7 @@ void server_listen(server_t *server, int port, char *address)
 			}
 			else {
 	
-				if (server->sysdata->verbose) { printf("setting server read events (%d, %d)\n", server->servers[index].handle, index); }
+				if (server->sysdata->verbose > 1) { printf("setting server read events (%d, %d)\n", server->servers[index].handle, index); }
 				assert(server->sysdata->evbase != NULL);
 				
 				assert(server->servers[index].handle >= 0);
@@ -203,7 +203,7 @@ static node_t * create_node(server_t *server, int handle)
 	assert(server->active < server->maxconns);
 	assert(server->active >= 0);
 
-	printf("create_node(): active=%d, maxconns=%d\n", server->active, server->maxconns);
+	if (server->sysdata->verbose > 1) printf("create_node(): active=%d, maxconns=%d\n", server->active, server->maxconns);
 	
 	assert(server->active < server->maxconns);
 	
@@ -286,7 +286,7 @@ void server_event_handler(int hid, short flags, void *data)
 	}
 	else {
 		// mark socket as non-blocking
-		if (server->sysdata->verbose) printf(" -- node(%d) setting non-blocking mode\n", sfd);
+		if (server->sysdata->verbose > 1) printf(" -- node(%d) setting non-blocking mode\n", sfd);
 		if ((flags = fcntl(sfd, F_GETFL, 0)) < 0 || fcntl(sfd, F_SETFL, flags | O_NONBLOCK) < 0) {
 				perror("setting O_NONBLOCK");
 				close(sfd);
@@ -294,7 +294,7 @@ void server_event_handler(int hid, short flags, void *data)
 		}
 		
 		// setup the event handling...
-		if (server->sysdata->verbose) printf(" -- node(%d) setting read event flags\n", sfd);
+		if (server->sysdata->verbose > 1) printf(" -- node(%d) setting read event flags\n", sfd);
 		assert(server->sysdata->evbase != NULL);
 		event_set(&node->event, sfd, EV_READ | EV_PERSIST, node_event_handler, (void *)node);
 		event_base_set(server->sysdata->evbase, &node->event);

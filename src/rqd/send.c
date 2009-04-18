@@ -6,10 +6,13 @@
 #include <assert.h>
 #include <errno.h>
 #include <rispbuf.h>
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 
 
+//-----------------------------------------------------------------------------
+// 
 void sendConsumeReply(node_t *node, char *queue, int qid)
 {
 	assert(node != NULL);
@@ -43,28 +46,36 @@ void sendMessage(node_t *node, message_t *msg)
 	assert(msg->data);
 	assert(msg->queue);
 
-
-/*
-	What is the best way to handle messages that have been sent to a node?   We need to keep track of it at the node level so that we can find it again.   We definately need a refcount on the message.  We should decouple the messages from the linked lists, and have seperate linked lists for source_nodes, queues and target_nodes.  Should we create a linked list library?  
-*/
-
-
-
 	q = msg->queue;
 	assert(q->qid > 0);
+
+	if (node->sysdata->verbose > 1) printf("sendMessage.  Node:%d, msg_id:%d\n", node->handle, msg->id);
+
+
+	// add the commands to the out queue.
+	addCmd(node->build, RQ_CMD_CLEAR);
 
 	if (BIT_TEST(msg->flags, FLAG_MSG_BROADCAST)) {
 		// We are sending a broadcast message
 		assert(BIT_TEST(msg->flags, FLAG_MSG_NOREPLY));
 		assert(msg->id == 0);
 		assert(msg->target_node == NULL);
+
+		addCmd(node->build, RQ_CMD_BROADCAST);
+		addCmd(node->build, RQ_CMD_NOREPLY);
 	}
 	else {
 		assert(msg->target_node);
+
+		if (BIT_TEST(msg->flags, FLAG_MSG_NOREPLY)) 
+			addCmd(node->build, RQ_CMD_NOREPLY);
+		
+		addCmd(node->build, RQ_CMD_REQUEST);
+
+		assert(msg->id > 0);
+		addCmdLargeInt(node->build, RQ_CMD_ID, msg->id);
 	}
 
-	// add the commands to the out queue.
-	addCmd(node->build, RQ_CMD_CLEAR);
 	addCmdInt(node->build, RQ_CMD_QUEUEID, q->qid);
 	addCmdLargeStr(node->build, RQ_CMD_PAYLOAD, msg->data->length, msg->data->data);
 	addCmd(node->build, RQ_CMD_EXECUTE);

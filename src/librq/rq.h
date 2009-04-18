@@ -4,8 +4,15 @@
 #include <event.h>
 #include <netdb.h>
 #include <expbuf.h>
+#include <linklist.h>
+#include <mempool.h>
 #include <risp.h>
 
+// This version indicates the version of the library so that developers of
+// services can ensure that the correct version is installed.
+// This version number should be incremented with every change that would
+// effect logic.
+#define __LIBRQ_VERSION  0x01
 
 /* Get a consistent bool type */
 #if HAVE_STDBOOL_H
@@ -15,13 +22,12 @@
 #endif
 
 
-// Since we will be using a number of bit masks to check for data status's and so on, we should include some macros to make it easier.
+// Since we will be using a number of bit masks to check for data status's and
+// so on, we should include some macros to make it easier.
 #define BIT_TEST(arg,val) (((arg) & (val)) == (val))
 #define BIT_SET(arg,val) ((arg) |= (val))
 #define BIT_CLEAR(arg,val) ((arg) &= ~(val))
 #define BIT_TOGGLE(arg,val) ((arg) ^= (val))
-
-
 
 
 
@@ -32,13 +38,14 @@
 #define RQ_DEFAULT_PORT      13700
 
 // start out with an 1kb buffer.  Whenever it is full, we will double the
-// buffer, so this is just a starting point.
+// buffer, so this is just a minimum starting point.
 #define RQ_DEFAULT_BUFFSIZE	1024
 
 // The messages sent through the controller can be of 3 types.  These defines
 // would really only be used by the external handles to determine what it is.
 #define RQ_TYPE_REQUEST				1
 #define RQ_TYPE_REPLY					2
+#define RQ_TYPE_BROADCAST     3
 
 // The priorities are used to determine which node to send a request to.  A
 // priority of NONE indicates taht this node should only receive broadcast
@@ -47,7 +54,6 @@
 #define RQ_PRIORITY_LOW        10
 #define RQ_PRIORITY_NORMAL     20
 #define RQ_PRIORITY_HIGH       30
-
 
 
 
@@ -95,33 +101,49 @@ typedef struct {
 	int port;
 } rq_conn_t;
 
+typedef int queue_id_t;
+typedef int msg_id_t;
+
 typedef struct {
-	char *queue;
+	msg_id_t id;
 	char  type;
-	int   id;
-	char  broadcast;
 	char  noreply;
-	struct {
-		void *data;
-		int   length;
-	} request, reply;
-	void *arg;
+	expbuf_t data;
+	void *queue;
 } rq_message_t;
 
-
 typedef struct {
 	char *queue;
-	int   qid;
+	queue_id_t qid;
 	void (*handler)(rq_message_t *msg, void *arg);
 	void *arg;
 } rq_queue_t;
 
+
+#define RQ_DATA_FLAG_REQUEST      1
+#define RQ_DATA_FLAG_REPLY        2
+#define RQ_DATA_FLAG_RECEIVED     4
+#define RQ_DATA_FLAG_DELIVERED    8
+#define RQ_DATA_FLAG_BROADCAST    16
+#define RQ_DATA_FLAG_UNDELIVERED  32
+#define RQ_DATA_FLAG_CLOSING      64
+#define RQ_DATA_FLAG_SERVER_FULL  128
+#define RQ_DATA_FLAG_NOREPLY      256
+
+#define RQ_DATA_MASK_PRIORITY     1
+#define RQ_DATA_MASK_QUEUEID      2
+#define RQ_DATA_MASK_TIMEOUT      4
+#define RQ_DATA_MASK_ID           8
+#define RQ_DATA_MASK_QUEUE        16
+#define RQ_DATA_MASK_PAYLOAD      32
+
+
 typedef struct {
-  risp_command_t op;
-	char broadcast;
-	char noreply;
-	unsigned short id;
-	unsigned short qid;
+ 	unsigned int mask;
+	unsigned int flags;
+	
+	msg_id_t id;
+	queue_id_t qid;
 	unsigned short timeout;
 	unsigned short priority;
 	expbuf_t payload;
@@ -136,12 +158,17 @@ typedef struct {
 
 	expbuf_t in, out, readbuf, build;
 
-	rq_conn_t *connlist;
-	int conns;
-	int connactive;
+	// linked-list of our connections.  Only the one at the head is likely to be
+	// active (although it might not be).  When a connection is dropped or is
+	// timed out, it is put at the bottom of the list.
+	list_t connlist;
 
-	rq_queue_t **queuelist;
-	int queues;
+	// Linked-list of queues that this node is consuming.
+	list_t queues;
+
+	// linked-list of the messages that are being processed (on the head), and
+	// the empty messages that can be used (at the tail)
+	list_t messages;
 
 	rq_data_t data;
 } rq_t;

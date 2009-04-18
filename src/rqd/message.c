@@ -5,6 +5,7 @@
 
 #include <assert.h>
 #include <rq.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 
@@ -40,6 +41,7 @@ void message_free(message_t *msg)
 	assert(msg->queue == NULL);
 
 	if (msg->data != NULL) {
+		expbuf_clear(msg->data);
 		expbuf_pool_return(msg->sysdata->bufpool, msg->data);
 		msg->data = NULL;
 	}
@@ -117,7 +119,31 @@ void message_set_timeout(message_t *msg, int seconds)
 	// create an action to monitor and update the countdown.
 	assert(msg->sysdata->actpool);
 	action = action_pool_new(msg->sysdata->actpool);
-	action_set(action, 0, ah_msg_countdown, msg);
+	action_set(action, 0, ah_message, msg);
 	action = NULL;
+}
+
+
+//-----------------------------------------------------------------------------
+// This action is used to delete a message.  It will only delete the message if
+// it is safe to do so.  If it cannot delete the message, it will simply exit,
+// returning the action.  When other activities occur that might allow for the
+// message to be deleted, it will raise the action again.
+void message_delete(message_t *msg)
+{
+	assert(msg);
+	assert(msg->sysdata);
+	assert(msg->sysdata->msgpool);
+
+	// if the flags indicate that the message has been decoupled,
+	if (msg->source_node == NULL && msg->target_node == NULL && msg->queue == NULL) {
+		// clear it, and add it back to the mempool we got it from.
+		message_free(msg);
+		mempool_return(msg->sysdata->msgpool, msg);
+	}
+	else {
+		if (msg->sysdata->verbose > 1)
+			printf("Unable to delete message(%X) since it is still referenced somewhere\n", (unsigned int)msg);
+	}
 }
 

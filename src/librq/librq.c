@@ -169,9 +169,10 @@ int rq_daemon(char *username, char *pidfile, int noclose)
 void rq_data_init(rq_data_t *data)
 {
 	assert(data != NULL);
-	data->op = RQ_CMD_NOP;
-	data->broadcast = 0;
-	data->noreply = 0;
+	
+	data->flags = 0;
+	data->mask = 0;
+	
 	data->id = 0;
 	data->qid = 0;
 	data->timeout = 0;
@@ -184,6 +185,7 @@ void rq_data_free(rq_data_t *data)
 {
 	assert(data != NULL);
 	expbuf_free(&data->payload);
+	expbuf_free(&data->queue);
 }
 
 // Initialise an RQ structure.  
@@ -196,16 +198,9 @@ void rq_init(rq_t *rq)
 	rq->evbase = NULL;
 	rq->risp = NULL;
 
-	rq->connlist = NULL;
-	rq->conns = 0;
-	rq->connactive = -1;
-
-	rq->queuelist = NULL;
-	int queues = 0;
+	ll_init(&rq->connlist);
+	ll_init(&rq->queues);
 	
-// 	rq->arg = NULL;
-// 	rq->handler = NULL;
-
 	expbuf_init(&rq->readbuf, RQ_DEFAULT_BUFFSIZE);
 	expbuf_init(&rq->in, 0);
 	expbuf_init(&rq->out, 0);
@@ -241,44 +236,38 @@ void rq_queue_free(rq_queue_t *queue)
 
 void rq_cleanup(rq_t *rq)
 {
+	rq_queue_t *q;
 	assert(rq != NULL);
 
+	// at this point, all the connections should have been removed from the connlist.
+	assert(ll_count(&rq->connlist) == 0);
 
-	assert((rq->connlist == NULL && rq->conns == 0) || (rq->connlist != NULL && rq->conns > 0));
+	// connection should have been closed.
+	assert(rq->handle == INVALID_HANDLE);
+
+	// cleanup the risp object.
 	assert(rq->risp != NULL);
 	risp_shutdown(rq->risp);
 	rq->risp = NULL;
 
-	assert(rq->handle == INVALID_HANDLE);
-	if (rq->connlist != NULL) {
-		free(rq->connlist);
-		rq->connlist = NULL;
-		rq->conns = 0;
-		rq->connactive = -1;
-	}
+	// free the resources allocated for the connlist.
+	ll_free(&rq->connlist);
 
+	// free all the buffers.
 	expbuf_free(&rq->readbuf);
 	expbuf_free(&rq->in);
 	expbuf_free(&rq->out);
 	expbuf_free(&rq->build);
 
+	// cleanup the data structure.
 	rq_data_free(&rq->data);
 
-	assert((rq->queues == 0 && rq->queuelist == NULL) || (rq->queues > 0 && rq->queuelist != NULL));
-	while (rq->queues > 0) {
-		rq->queues--;
-		if (rq->queuelist[rq->queues] != NULL) {
-			rq_queue_free(rq->queuelist[rq->queues]);
-			free(rq->queuelist[rq->queues]);
-			rq->queuelist[rq->queues] = NULL;
-		}
+	// cleanup all the queues that we have.
+	while (q = ll_pop_head(&rq->queues)) {
+		rq_queue_free(q);
+		free(q);
 	}
-	if (rq->queuelist != NULL) {
-		free(rq->queuelist);
-		rq->queuelist = NULL;
-	}
-
-	assert(rq->queues == 0 && rq->queuelist == NULL);
+	ll_free(&rq->queues);
 }
 
 
@@ -362,6 +351,8 @@ void rq_settimeout(rq_t *rq, unsigned int msecs, void (*handler)(void *arg), voi
 }
 
 
+//-----------------------------------------------------------------------------
+// add a controller to the end of the connection list.
 void rq_addcontroller(rq_t *rq, char *host, int port)
 {
 	rq_conn_t *conn;
@@ -371,22 +362,16 @@ void rq_addcontroller(rq_t *rq, char *host, int port)
 	assert(host != NULL && port > 0);
 	assert(host[0] != '\0');
 	
-	if (rq->conns == 0) {
-		rq->connlist = (rq_conn_t *) malloc(sizeof(rq_conn_t));
-		conn = rq->connlist;
-		rq->conns ++;
-	}
-	else {
-		rq->connlist = (rq_conn_t *) realloc(rq->connlist, sizeof(rq_conn_t) * (rq->conns + 1));
-		conn = &rq->connlist[rq->conns];
-		rq->conns ++;
-	}
+	conn = (rq_conn_t *) malloc(sizeof(rq_conn_t));
+	assert(conn);
 	
 	conn->hostname = host;
 	conn->port = port;
 	for(j=0; j<5; j++) {
 		conn->resolved[j] = 0;
 	}
+
+	ll_push_tail(&rq->connlist, conn); 
 }
 
 
@@ -405,7 +390,7 @@ int rq_connect(rq_t *rq)
 {
 	int result = -1;
 	int sock;
-	rq_conn_t *conn;
+	rq_conn_t *conn, *first;
 	int i, j;
 	struct sockaddr_in sin;
 	unsigned long ulAddress;
@@ -415,12 +400,11 @@ int rq_connect(rq_t *rq)
 
 	assert(rq->handle == INVALID_HANDLE);
 	assert(rq->evbase != NULL);
-	assert(rq->conns > 0);
-	assert(rq->connlist != NULL);
+	assert(ll_count(&rq->connlist) > 0);
 
-	for (i=0; i<rq->conns && result < 0; i++) {
-
-		conn = &rq->connlist[i];
+	conn = ll_get_head(&rq->connlist);
+	first = conn;
+	while (conn && result < 0) {
 
 		assert(conn->hostname != NULL);
 		assert(conn->hostname[0] != '\0');
@@ -466,8 +450,6 @@ int rq_connect(rq_t *rq)
 
 						result = 0;
 						rq->handle = sock;
-						rq->connactive = i;
-						assert(rq->connactive < rq->conns);
 					}
 					else {
 						close(sock);
@@ -476,7 +458,23 @@ int rq_connect(rq_t *rq)
 					}
 				}
 			}
-		}	
+
+			// if we dont have a connection...
+			if (result < 0) {
+				// connection failed.
+				
+				// Need to pop this connection from the top of the list and add it to the bottom.
+				conn = ll_pop_head(&rq->connlist);
+				ll_push_tail(&rq->connlist, conn);
+
+				// and now get the next one from the list.
+				conn = ll_get_head(&rq->connlist);
+	
+				// if we get a conn that is the same as the first one we tried, then we need to exit with a failure.
+				if (conn == first)
+					conn = NULL;
+			}
+		}
 	}
 
 	assert((result < 0 && rq->handle == INVALID_HANDLE) || (result == 0 && rq->handle > 0));
@@ -506,14 +504,10 @@ static void rq_process_read(rq_t *rq)
 		assert(rq->readbuf.data != NULL);
 		assert(rq->readbuf.max > 0);
 		
-printf("rq(%d) - reading data\n", rq->handle);
-		
 		res = read(rq->handle, rq->readbuf.data, rq->readbuf.max);
 		if (res > 0) {
 			rq->readbuf.length = res;
 			assert(rq->readbuf.length <= rq->readbuf.max);
-
-printf("rq(%d) - data received (%d)\n", rq->handle, res);
 
 			// if we pulled out the max we had avail in our buffer, that means we can pull out more at a time.
 			if (res == rq->readbuf.max) {
@@ -590,17 +584,13 @@ static void rq_process_handler(int fd, short int flags, void *arg)
 
 	assert(rq != NULL);
 
-	printf("Processing data: rqh=%d, fd=%d, flags=%d\n", rq->handle, fd, flags);
-	
 	assert(rq->handle == fd);
 
 	if (flags & EV_READ) {
-		printf("rq_process_handler(%d, EV_READ))\n", fd);
 		rq_process_read(rq);
 	}
 	
 	if (flags & EV_WRITE) {
-		printf("rq_process_handler(%d, EV_WRITE))\n", fd);
 		rq_process_write(rq);
 	}
 }
@@ -673,65 +663,58 @@ static void rq_senddata(rq_t *rq, char *data, int length)
 // queue.  We will add queue information to our RQ structure.
 void rq_consume(rq_t *rq, char *queue, int max, int priority, int exclusive, void (*handler)(rq_message_t *msg, void *arg), void *arg)
 {
-	int i;
 	int found;
-	int avail=-1;
+	rq_queue_t *q;
+	void *next;
 	
 	assert(rq != NULL);
 	assert(queue != NULL);
+	assert(strlen(queue) < 256);
 	assert(max >= 0);
 	assert(priority == RQ_PRIORITY_NONE || priority == RQ_PRIORITY_LOW || priority == RQ_PRIORITY_NORMAL || priority == RQ_PRIORITY_HIGH);
 	assert(handler != NULL);
 
 	// check that we are connected to a controller.
-	assert(rq->handle != INVALID_HANDLE && rq->connactive >= 0);
+	assert(rq->handle != INVALID_HANDLE && ll_count(&rq->connlist) > 0);
 
+	// we shouldn't have anything left over in our build buffer.
 	assert(rq->build.length == 0);
 
 	// check that we are not already consuming this queue.
-	assert((rq->queues == 0 && rq->queuelist == NULL) || (rq->queues > 0 && rq->queuelist != NULL));
 	found = 0;
-	for (i=0; i<rq->queues && found == 0; i++) {
-		if (rq->queuelist[i] != NULL) {
-			if (strcmp(rq->queuelist[i]->queue, queue) == 0) {
-				// the queue is already in our list...
-	
-				// we send a message to controller cancelling the queue.
-				addCmd(&rq->build, RQ_CMD_CLEAR);
-				addCmd(&rq->build, RQ_CMD_CANCEL_QUEUE);
-				addCmdShortStr(&rq->build, RQ_CMD_QUEUE, strlen(queue), queue);
-				addCmd(&rq->build, RQ_CMD_EXECUTE);
-				
-				// we over-write what is already in there...
-				rq->queuelist[i]->handler = handler;
-				rq->queuelist[i]->arg = arg;
-				
-				found ++;
-			}
+	next = ll_start(&rq->queues);
+	q = ll_next(&rq->queues, &next);
+	while (q && found == 0) {
+		if (strcmp(q->queue, queue) == 0) {
+			// the queue is already in our list...
+
+			// we send a message to controller cancelling the queue.
+			addCmd(&rq->build, RQ_CMD_CLEAR);
+			addCmd(&rq->build, RQ_CMD_CANCEL_QUEUE);
+			addCmdShortStr(&rq->build, RQ_CMD_QUEUE, strlen(queue), queue);
+			addCmd(&rq->build, RQ_CMD_EXECUTE);
+
+			// we over-write what is already in there...
+			q->handler = handler;
+			q->arg = arg;
+
+			found ++;
 		}
-		else if (avail < 0) {
-			avail = i;
+		else {
+			q = ll_next(&rq->queues, &next);
 		}
 	}
 
 	if (found == 0) {
-		if (avail < 0) {
-			// this is a new queue, create queue entry in rq.
-		
-			rq->queuelist = (rq_queue_t **) realloc(rq->queuelist, sizeof(rq_queue_t *) * (rq->queues + 1));
-			rq->queuelist[rq->queues] = NULL;
-			avail = rq->queues;
-			rq->queues ++;
-		}
+		q = (rq_queue_t *) malloc(sizeof(rq_queue_t));
+		assert(q != NULL);
 
-		assert(avail >= 0);
-		assert(rq->queuelist[avail] == NULL);
-		rq->queuelist[avail] = (rq_queue_t *) malloc(sizeof(rq_queue_t));
-		assert(rq->queuelist[avail] != NULL);
-		rq_queue_init(rq->queuelist[avail]);
-		rq->queuelist[avail]->queue = queue;
-		rq->queuelist[avail]->handler = handler;
-		rq->queuelist[avail]->arg = arg;
+		rq_queue_init(q);
+		q->queue = queue;
+		q->handler = handler;
+		q->arg = arg;
+
+		ll_push_tail(&rq->queues, q);
 	}
 	
 	// send consume request to controller.
@@ -751,11 +734,124 @@ void rq_consume(rq_t *rq, char *queue, int max, int priority, int exclusive, voi
 
 
 
-
+// A request has been 
 static void processRequest(rq_t *rq)
 {
+	msg_id_t msgid;
+	queue_id_t qid = 0;
+	char *qname = NULL;
+	rq_queue_t *tmp, *queue;
+	void *next;
+	rq_message_t *msg;
+	
 	assert(rq != NULL);
-	assert(0);
+
+	// get the required data out of the data structure, and make sure that we have all we need.
+	assert(BIT_TEST(rq->data.flags, RQ_DATA_FLAG_REQUEST));
+	assert(BIT_TEST(rq->data.flags, RQ_DATA_FLAG_BROADCAST) == 0);
+
+	if (BIT_TEST(rq->data.mask, RQ_DATA_MASK_ID) && BIT_TEST(rq->data.mask, RQ_DATA_MASK_PAYLOAD) && (BIT_TEST(rq->data.mask, RQ_DATA_MASK_QUEUEID) || BIT_TEST(rq->data.mask, RQ_DATA_MASK_QUEUE))) {
+
+		// get message ID
+		msgid = rq->data.id;
+		assert(msgid > 0);
+
+		// get queue Id or queue name.
+		if (BIT_TEST(rq->data.mask, RQ_DATA_MASK_QUEUEID))
+			qid = rq->data.qid;
+		if (BIT_TEST(rq->data.mask, RQ_DATA_MASK_QUEUE))
+			qname = expbuf_string(&rq->data.queue);
+		assert((qname == NULL && qid > 0) || (qname && qid == 0));
+
+		// find the queue to handle this request.
+		queue = NULL;
+		next = ll_start(&rq->queues);
+		tmp = ll_next(&rq->queues, &next);
+		while (tmp) {
+			assert(tmp->qid > 0);
+			assert(tmp->queue);
+			if (qid == tmp->qid || strcmp(qname, tmp->queue) == 0) {
+				queue = tmp;
+				tmp = NULL;
+			}
+			else {
+				tmp = ll_next(&rq->queues, &next);
+			}
+		}
+
+		if (queue == NULL) {
+			
+			// we dont seem to be consuming that queue... 
+			addCmd(&rq->build, RQ_CMD_CLEAR);
+			addCmd(&rq->build, RQ_CMD_UNDELIVERED);
+			addCmdLargeInt(&rq->build, RQ_CMD_ID, (short int)msgid);
+			addCmd(&rq->build, RQ_CMD_EXECUTE);
+			rq_senddata(rq, rq->build.data, rq->build.length);
+			expbuf_clear(&rq->build);
+		}
+		else {
+			// send a delivery message back to the controller.
+			addCmd(&rq->build, RQ_CMD_CLEAR);
+			addCmd(&rq->build, RQ_CMD_DELIVERED);
+			addCmdLargeInt(&rq->build, RQ_CMD_ID, (short int)msgid);
+			addCmd(&rq->build, RQ_CMD_EXECUTE);
+			rq_senddata(rq, rq->build.data, rq->build.length);
+			expbuf_clear(&rq->build);
+
+			// create a message structure.
+			msg = ll_get_tail(&rq->messages);
+			if (msg == NULL) {
+				// there is no message object in the list.  We need to create one.
+				msg = (rq_message_t *) malloc(sizeof(rq_message_t));
+				rq_message_init(msg);
+			}
+			else if (msg->id > 0) {
+				// the message at the tail, is in use, so we need to create one.
+				msg = (rq_message_t *) malloc(sizeof(rq_message_t));
+				rq_message_init(msg);
+			}
+			else {
+				// the message is ready to be used, so we need to pop it off.
+				msg = ll_pop_tail(&rq->messages);
+			}
+			assert(msg);
+			assert(msg->id == 0);
+
+			// fill out the message details, and add it to the head of the messages list.
+			assert(queue && msgid > 0);
+			msg->queue = queue;
+			msg->type = RQ_TYPE_REQUEST;
+			msg->id = msgid;
+			if (BIT_TEST(rq->data.flags, RQ_DATA_FLAG_NOREPLY))
+				msg->noreply = 1;
+
+			expbuf_set(&msg->data, rq->data.payload.data, rq->data.payload.length);
+		
+			queue->handler(msg, queue->arg);
+
+			// after the handler has processed.
+
+			// if the message was NOREPLY, then we dont need to reply, and we can clear the message.
+			if (msg->noreply == 1) {
+				rq_message_clear(msg);
+				assert(msg->id == 0);
+				ll_push_tail(&rq->messages, msg);
+			}
+			else {
+				// If the message type is now REPLY, then it means that we already have
+				// a reply to process.  Dont need to add it to the out-process, as that
+				// would already have been done.
+				assert(0);
+			}
+
+
+		}
+	}
+	else {
+		// we dont have the required data to handle a request.
+		// TODO: This should be handled better.
+		assert(0);
+	}
 }
 			
 static void processClosing(rq_t *rq)
@@ -786,21 +882,24 @@ static void processReceived(rq_t *rq)
 
 static void storeQueueID(rq_t *rq, char *queue, int qid)
 {
-	int i;
-	
+	rq_queue_t *q;
+	void *next;
+
 	assert(rq != NULL);
 	assert(queue != NULL);
 	assert(qid > 0);
-	assert(rq->queues > 0);
+	assert(ll_count(&rq->queues) > 0);
 
-	for (i=0; i<rq->queues; i++) {
-		if (rq->queuelist[i] != NULL) {
-			assert(rq->queuelist[i]->queue != NULL);
-			if (strcmp(rq->queuelist[i]->queue, queue) == 0) {
-				assert(rq->queuelist[i]->qid == 0);
-				rq->queuelist[i]->qid = qid;
-				break;
-			}
+	next = ll_start(&rq->queues);
+	q = ll_next(&rq->queues, &next);
+	while (q) {
+		if (strcmp(q->queue, queue) == 0) {
+			assert(q->qid == 0);
+			q->qid = qid;
+			q = NULL;
+		}
+		else {
+			q = ll_next(&rq->queues, &next);
 		}
 	}
 }
@@ -816,15 +915,16 @@ static void cmdClear(void *ptr)
 	rq = (rq_t *) ptr;
 	assert(rq != NULL);
 
-	rq->data.op = RQ_CMD_NOP;
-	rq->data.broadcast = 0;
-	rq->data.noreply = 0;
+	rq->data.mask = 0;
+	rq->data.flags = 0;
+	
 	rq->data.id = 0;
 	rq->data.qid = 0;
 	rq->data.timeout = 0;
 	rq->data.priority = 0;
 
-	printf("CLEAR\n");
+	expbuf_clear(&rq->data.queue);
+	expbuf_clear(&rq->data.payload);
 }
 
 static void cmdExecute(void *ptr)
@@ -835,41 +935,21 @@ static void cmdExecute(void *ptr)
 	rq = (rq_t *) ptr;
 	assert(rq != NULL);
 
-	printf("EXECUTE (%d)\n", rq->data.op);
-	
-	switch (rq->data.op) {
-
-		case RQ_CMD_REQUEST:
-			processRequest(rq);
-			break;
-
-		case RQ_CMD_CLOSING:
-			processClosing(rq);
-			break;
-
-		case RQ_CMD_SERVER_FULL:
-			processServerFull(rq);
-			break;
-
-		case RQ_CMD_RECEIVED:
-			processReceived(rq);
-			break;
-	
-		case RQ_CMD_DELIVERED:
-			processDelivered(rq);
-			break;
-	
-		default:
-			// what do we do if we dont have a valid operation?
-			if (rq->data.qid > 0 && rq->data.queue.length > 0) {
-				// the queue has been linked, so we need to mark the qid.
-				storeQueueID(rq, expbuf_string(&rq->data.queue), rq->data.qid);
-			}
-			else {
-				printf("Unexpected command - %d\n", rq->data.op);
-				assert(0);
-			}
-			break;
+	if (BIT_TEST(rq->data.flags, RQ_DATA_FLAG_REQUEST))
+		processRequest(rq);
+	else if (BIT_TEST(rq->data.flags, RQ_DATA_FLAG_CLOSING))
+		processClosing(rq);
+	else if (BIT_TEST(rq->data.flags, RQ_DATA_FLAG_SERVER_FULL))
+		processServerFull(rq);
+	else if (BIT_TEST(rq->data.flags, RQ_DATA_FLAG_RECEIVED))
+		processReceived(rq);
+	else if (BIT_TEST(rq->data.flags, RQ_DATA_FLAG_DELIVERED))
+		processDelivered(rq);
+	else if (BIT_TEST(rq->data.mask, RQ_DATA_MASK_QUEUEID))
+		storeQueueID(rq, expbuf_string(&rq->data.queue), rq->data.qid);
+	else {
+		printf("Unexpected command - (flags:%x, mask:%x)\n", rq->data.flags, rq->data.mask);
+		assert(0);
 	}
 }
 
@@ -881,10 +961,33 @@ static void cmdRequest(void *ptr)
 	rq = (rq_t *) ptr;
 	assert(rq != NULL);
 
-	rq->data.op = RQ_CMD_REQUEST;
-	printf("REQUEST\n");
+	// set the indicated flag.	
+	BIT_SET(rq->data.flags, RQ_DATA_FLAG_REQUEST);
+
+	// clear the incompatible flags.
+// 	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_REQUEST);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_REPLY);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_RECEIVED);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_DELIVERED);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_BROADCAST);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_UNDELIVERED);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_CLOSING);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_SERVER_FULL);
+// 	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_NOREPLY);
+
+	// clear the incompatible masks.
+// 	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_PRIORITY);
+// 	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_QUEUEID);
+// 	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_TIMEOUT);
+// 	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_ID);
+// 	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_QUEUE);
+// 	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_PAYLOAD);
 }
 
+//-----------------------------------------------------------------------------
+// This command is received from the controller when a request has been sent.
+// It indicates that the controller received the message from the node, and is
+// routing it to a consumer.
 static void cmdReceived(void *ptr)
 {
 	rq_t *rq;
@@ -893,8 +996,28 @@ static void cmdReceived(void *ptr)
 	rq = (rq_t *) ptr;
 	assert(rq != NULL);
 
-	rq->data.op = RQ_CMD_RECEIVED;
-	printf("RECEIVED\n");
+	// set the indicated flag.
+	BIT_SET(rq->data.flags, RQ_DATA_FLAG_RECEIVED);
+
+	// clear the incompatible flags.
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_REQUEST);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_REPLY);
+// 	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_RECEIVED);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_DELIVERED);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_BROADCAST);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_UNDELIVERED);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_CLOSING);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_SERVER_FULL);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_NOREPLY);
+
+	// clear the incompatible masks.
+	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_PRIORITY);
+	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_QUEUEID);
+	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_TIMEOUT);
+// 	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_ID);
+	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_QUEUE);
+	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_PAYLOAD);
+
 }
 
 static void cmdDelivered(void *ptr)
@@ -905,8 +1028,27 @@ static void cmdDelivered(void *ptr)
 	rq = (rq_t *) ptr;
 	assert(rq != NULL);
 
-	rq->data.op = RQ_CMD_DELIVERED;
-	printf("DELIVERED\n");
+	// set the indicated flag.
+	BIT_SET(rq->data.flags, RQ_DATA_FLAG_DELIVERED);
+
+	// clear the incompatible flags.
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_REQUEST);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_REPLY);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_RECEIVED);
+// 	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_DELIVERED);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_BROADCAST);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_UNDELIVERED);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_CLOSING);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_SERVER_FULL);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_NOREPLY);
+
+	// clear the incompatible masks.
+	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_PRIORITY);
+	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_QUEUEID);
+	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_TIMEOUT);
+// 	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_ID);
+	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_QUEUE);
+	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_PAYLOAD);
 }
 
 static void cmdBroadcast(void *ptr)
@@ -917,8 +1059,28 @@ static void cmdBroadcast(void *ptr)
 	rq = (rq_t *) ptr;
 	assert(rq != NULL);
 
-	rq->data.broadcast = 1;
-	printf("BROADCAST\n");
+	// set the indicated flag.
+	BIT_SET(rq->data.flags, RQ_DATA_FLAG_BROADCAST);
+
+	// clear the incompatible flags.
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_REQUEST);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_REPLY);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_RECEIVED);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_DELIVERED);
+// 	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_BROADCAST);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_UNDELIVERED);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_CLOSING);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_SERVER_FULL);
+// 	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_NOREPLY);
+
+	// clear the incompatible masks.
+	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_PRIORITY);
+// 	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_QUEUEID);
+// 	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_TIMEOUT);
+	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_ID);
+// 	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_QUEUE);
+// 	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_PAYLOAD);
+	
 }
 	
 static void cmdNoreply(void *ptr)
@@ -929,8 +1091,28 @@ static void cmdNoreply(void *ptr)
 	rq = (rq_t *) ptr;
 	assert(rq != NULL);
 
-	rq->data.noreply = 1;
-	printf("NOREPLY\n");
+	// set the indicated flag.
+	BIT_SET(rq->data.flags, RQ_DATA_FLAG_NOREPLY);
+
+	// clear the incompatible flags.
+// 	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_REQUEST);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_REPLY);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_RECEIVED);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_DELIVERED);
+// 	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_BROADCAST);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_UNDELIVERED);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_CLOSING);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_SERVER_FULL);
+// 	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_NOREPLY);
+
+	// clear the incompatible masks.
+// 	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_PRIORITY);
+// 	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_QUEUEID);
+// 	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_TIMEOUT);
+// 	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_ID);
+// 	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_QUEUE);
+// 	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_PAYLOAD);
+	
 }
 
 static void cmdClosing(void *ptr)
@@ -941,8 +1123,28 @@ static void cmdClosing(void *ptr)
 	rq = (rq_t *) ptr;
 	assert(rq != NULL);
 
-	rq->data.op = RQ_CMD_CLOSING;
-	printf("CLOSING\n");
+	// set the indicated flag.
+	BIT_SET(rq->data.flags, RQ_DATA_FLAG_CLOSING);
+
+	// clear the incompatible flags.
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_REQUEST);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_REPLY);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_RECEIVED);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_DELIVERED);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_BROADCAST);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_UNDELIVERED);
+// 	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_CLOSING);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_SERVER_FULL);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_NOREPLY);
+
+	// clear the incompatible masks.
+	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_PRIORITY);
+	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_QUEUEID);
+	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_TIMEOUT);
+	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_ID);
+	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_QUEUE);
+	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_PAYLOAD);
+	
 }
 	
 static void cmdServerFull(void *ptr)
@@ -953,8 +1155,28 @@ static void cmdServerFull(void *ptr)
 	rq = (rq_t *) ptr;
 	assert(rq != NULL);
 
-	rq->data.op = RQ_CMD_SERVER_FULL;
-	printf("SERVERFULL\n");
+	// set the indicated flag.
+	BIT_SET(rq->data.flags, RQ_DATA_FLAG_SERVER_FULL);
+
+	// clear the incompatible flags.
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_REQUEST);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_REPLY);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_RECEIVED);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_DELIVERED);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_BROADCAST);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_UNDELIVERED);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_CLOSING);
+// 	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_SERVER_FULL);
+	BIT_CLEAR(rq->data.flags, RQ_DATA_FLAG_NOREPLY);
+
+	// clear the incompatible masks.
+	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_PRIORITY);
+	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_QUEUEID);
+	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_TIMEOUT);
+	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_ID);
+	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_QUEUE);
+	BIT_CLEAR(rq->data.mask, RQ_DATA_MASK_PAYLOAD);
+	
 }
 	
 static void cmdID(void *ptr, risp_int_t value)
@@ -967,7 +1189,8 @@ static void cmdID(void *ptr, risp_int_t value)
 
 	assert(value > 0 && value <= 0xffff);
 	rq->data.id = value;
-	printf("ID (%d)", rq->data.id);
+	BIT_SET(rq->data.mask, RQ_DATA_MASK_ID);
+
 }
 	
 static void cmdQueueID(void *ptr, risp_int_t value)
@@ -980,7 +1203,8 @@ static void cmdQueueID(void *ptr, risp_int_t value)
 
 	assert(value > 0 && value <= 0xffff);
 	rq->data.qid = value;
-	printf("QUEUEID (%d)\n", value);
+	BIT_SET(rq->data.mask, RQ_DATA_MASK_QUEUEID);
+
 }
 	
 static void cmdTimeout(void *ptr, risp_int_t value)
@@ -993,8 +1217,7 @@ static void cmdTimeout(void *ptr, risp_int_t value)
 
 	assert(value > 0 && value <= 0xffff);
 	rq->data.timeout = value;
-	printf("TIMEOUT (%d)\n", value);
-
+	BIT_SET(rq->data.mask, RQ_DATA_MASK_TIMEOUT);
 }
 	
 static void cmdPriority(void *ptr, risp_int_t value)
@@ -1007,7 +1230,7 @@ static void cmdPriority(void *ptr, risp_int_t value)
 
 	assert(value > 0 && value <= 0xffff);
 	rq->data.priority = value;
-	printf("PRIORITY (%d)\n", value);
+	BIT_SET(rq->data.mask, RQ_DATA_MASK_PRIORITY);
 }
 	
 static void cmdPayload(void *ptr, risp_length_t length, risp_char_t *data)
@@ -1017,9 +1240,7 @@ static void cmdPayload(void *ptr, risp_length_t length, risp_char_t *data)
  	assert(length > 0);
  	assert(data != NULL);
  	expbuf_set(&rq->data.payload, data, length);
-// 	printf("node:%d PAYLOAD (len:%d)\n", ptr->handle, length);
-	printf("PAYLOAD (len:%d)\n", length);
-
+	BIT_SET(rq->data.mask, RQ_DATA_MASK_PAYLOAD);
 }
 
 
@@ -1030,8 +1251,7 @@ static void cmdQueue(void *ptr, risp_length_t length, risp_char_t *data)
  	assert(length > 0);
  	assert(data != NULL);
  	expbuf_set(&rq->data.queue, data, length);
-	printf("QUEUE (%s)\n", expbuf_string(&rq->data.queue));
-
+ 	BIT_SET(rq->data.mask, RQ_DATA_MASK_QUEUE);
 }
 
 static void cmdInvalid(void *ptr, void *data, risp_length_t len)
@@ -1117,28 +1337,21 @@ void rq_message_init(rq_message_t *msg)
 	msg->queue = NULL;
 	msg->type = 0;
 	msg->id = 0;
-	msg->broadcast = 0;
 	msg->noreply = 0;
 
-	msg->request.data = NULL;
-	msg->request.length = 0;
-	msg->reply.data = NULL;
-	msg->reply.length = 0;
-	
-	msg->arg = NULL;
+	expbuf_init(&msg->data, 0);
 }
 
 //-----------------------------------------------------------------------------
-// 
+// clean up the resources used by the message so that it can be used again.  We will not yet clean up the data buffer, because it can stay until the message list is actually destroyed on shutdown.
 void rq_message_clear(rq_message_t *msg)
 {
 	assert(msg != NULL);
-// 	assert(msg->request.data == NULL && msg->request.length == 0);
-// 	assert(msg->reply.data == NULL && msg->reply.length == 0);
 
-
-	// not sure what is the best here.  will have to wait until I write the code to implement message sending to see what is appropriate.
-	assert(0);
+	msg->id = 0;
+	msg->type = 0;
+	msg->noreply = 0;
+	msg->queue = NULL;
 }
 
 
@@ -1155,9 +1368,9 @@ void rq_message_setqueue(rq_message_t *msg, char *queue)
 void rq_message_setbroadcast(rq_message_t *msg)
 {
 	assert(msg != NULL);
-	assert(msg->broadcast == 0);
+	assert(msg->type == 0);
 
-	msg->broadcast = 1;
+	msg->type = RQ_TYPE_BROADCAST;
 }
 
 void rq_message_setnoreply(rq_message_t *msg)
@@ -1174,13 +1387,7 @@ void rq_message_setdata(rq_message_t *msg, int length, char *data)
 	assert(length > 0);
 	assert(data != NULL);
 
-	assert(msg->request.length == 0);
-	assert(msg->request.data == NULL);
-	assert(msg->reply.length == 0);
-	assert(msg->reply.data == NULL);
-	
-	msg->request.length = length;
-	msg->request.data = data;
+	expbuf_set(&msg->data, data, length);
 }
 
 // send a message to the controller.
@@ -1189,14 +1396,10 @@ void rq_send(rq_t *rq, rq_message_t *msg)
 	assert(rq != NULL);
 	assert(msg != NULL);
 
-	assert(msg->type == 0);
-	msg->type = RQ_TYPE_REQUEST;
+	if (msg->type == 0);
+		msg->type = RQ_TYPE_REQUEST;
 
-	assert(msg->request.length > 0);
-	assert(msg->request.data != NULL);
-
-	assert(msg->reply.length == 0);
-	assert(msg->reply.data == NULL);
+	assert(msg->data.length > 0);
 
 	// if there is no data in the 'out' queue, then attempt to send the request to the socket.  Any that we are unable to send, should be added to teh out queue, and the WRITE event should be established.
 
