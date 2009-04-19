@@ -305,6 +305,9 @@ void queue_cancel_node(node_t *node)
 		}
 		
 		queue = ll_next(node->sysdata->queues, &next_queue);
+
+		// even though the node is being removed from the queue, if there are no more nodes, and there are no messages in the queue, then the queue needs to be deleted.
+		assert(0);
 	}
 }
 

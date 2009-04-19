@@ -126,8 +126,9 @@ static void node_closed(node_t *node)
 	message_t *msg;
 	action_t *action;
 	
-	assert(node != NULL);
-	assert(node->sysdata != NULL);
+	assert(node);
+	assert(node->sysdata);
+	assert(node->sysdata->queues);
 
 	// we've definately lost connection to the node, so we need to mark it by
 	// clearing the handle.
@@ -135,7 +136,7 @@ static void node_closed(node_t *node)
 	node->handle = INVALID_HANDLE;
 
 	// we need to remove the consume on the queues.
-	if (node->sysdata->queues) queue_cancel_node(node);
+	queue_cancel_node(node);
 
 	// we need to remove (return) any messages that this node was processing.
 	while ((msg = ll_pop_head(&node->out_msg)) != NULL) {
@@ -164,6 +165,7 @@ static void node_closed(node_t *node)
 		event_del(&node->event);
 		BIT_CLEAR(node->flags, FLAG_NODE_ACTIVE);
 	}
+
 
 	// setup an action to free the node.
 	action = action_pool_new(node->sysdata->actpool);
