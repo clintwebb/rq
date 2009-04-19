@@ -1,7 +1,8 @@
 all: rqd
 
 ARGS=-g -Wall -O2
-
+# -fprofile-arcs -ftest-coverage
+# -pg
 
 H_settings=settings.h
 H_system_data=system_data.h /usr/include/rq.h
@@ -26,50 +27,52 @@ DEBUG_LIBS=
 LIBS=-lrisp -levent -lexpbuf -lexpbufpool -lrispbuf -lrq -levactions -lmempool -llinklist $(DEBUG_LIBS)
 
 rqd: $(OBJS)
-	gcc -o $@ $(OBJS) $(LIBS) $(ARGS)
+	gcc -o $@ $(ARGS) $(OBJS) $(LIBS) 
 
 actions.o: actions.c $(H_actions) $(H_server) $(H_stats) $(H_queue)
-	gcc -c -o $@ actions.c $(ARGS)
+	gcc -c -o $@ $(ARGS) actions.c 
 
 commands.o: commands.c $(H_commands) $(H_node) $(H_process)
-	gcc -c -o $@ commands.c $(ARGS)
+	gcc -c -o $@ $(ARGS) commands.c
 
 data.o: data.c $(H_data)
-	gcc -c -o $@ data.c $(ARGS)
+	gcc -c -o $@ $(ARGS) data.c
 
 daemon.o: daemon.c daemon.h
-	gcc -c -o $@ daemon.c $(ARGS)
+	gcc -c -o $@ $(ARGS) daemon.c
 
 message.o: message.c $(H_message) $(H_queue) $(H_actions)
-	gcc -c -o $@ message.c $(ARGS)
+	gcc -c -o $@ $(ARGS) message.c
 
 node.o: node.c $(H_node) $(H_data) $(H_stats) $(H_queue) $(H_actions)
-	gcc -c -o $@ node.c $(ARGS)
+	gcc -c -o $@ $(ARGS) node.c
 
 process.o: process.c $(H_process) $(H_send) $(H_queue) $(H_message) $(H_stats)
-	gcc -c -o $@ process.c $(ARGS)
+	gcc -c -o $@ $(ARGS) process.c
 
 queue.o: queue.c $(H_queue) $(H_server) $(H_send)
-	gcc -c -o $@ queue.c $(ARGS)
+	gcc -c -o $@ $(ARGS) queue.c
 
 rqd.o: rqd.c daemon.h $(H_actions) $(H_commands) $(H_server) $(H_settings) $(H_stats) $(H_system_data)
-	gcc -c -o $@ rqd.c $(ARGS)
+	gcc -c -o $@ $(ARGS) rqd.c
 
 send.o: send.c $(H_send) $(H_queue)
-	gcc -c -o $@ send.c $(ARGS)
+	gcc -c -o $@ $(ARGS) send.c
 
 server.o: server.c $(H_server) $(H_commands) $(H_queue) $(H_settings)
-	gcc -c -o $@ server.c $(ARGS)
+	gcc -c -o $@ $(ARGS) server.c
 
 settings.o: settings.c $(H_settings)
-	gcc -c -o $@ settings.c $(ARGS)
+	gcc -c -o $@ $(ARGS) settings.c
 
 stats.o: stats.c $(H_stats) $(H_server) $(H_queue)
-	gcc -c -o $@ stats.c $(ARGS)
+	gcc -c -o $@ $(ARGS) stats.c
 
 
 
 clean:
 	@-rm rqd
 	@-rm *.o
+	@-rm *.gcno
+	@-rm gmon.out
 
