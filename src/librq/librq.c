@@ -334,6 +334,10 @@ void rq_settimeout(rq_t *rq, unsigned int msecs, void (*handler)(void *arg), voi
 			t.tv_sec = msecs / 1000;
 			t.tv_usec = (msecs % 1000) * 1000;
 		}
+		else {
+			t.tv_sec = 0;
+			t.tv_usec = msecs * 1000;
+		}
 	}
 
 	// rq object needs to be added to the event system before a timeout can be set.
