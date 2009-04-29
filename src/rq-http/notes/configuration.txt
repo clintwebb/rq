@@ -1,0 +1,33 @@
+The config for the RQ-HTTP service will be stored in an sqlite database.
+When the service starts up, it will load all this information into a tree structure, 
+
+CREATE TABLE Hosts (
+  HostID   INTEGER UNIQUE PRIMARY KEY,
+  Consumer TEXT
+);
+
+CREATE TABLE Aliases (
+  AliasID  INTEGER UNIQUE PRIMARY KEY,
+  HostID   INTEGER,
+  Alias    TEXT
+);
+
+
+CREATE TABLE Paths (
+  PathID   INTEGER UNIQUE PRIMARY KEY,
+  HostID   INTEGER,
+  ParentID INTEGER,
+  Path     TEXT,
+  Consumer TEXT
+);
+
+Examples:
+BEGIN;
+INSERT INTO Hosts (Consumer) VALUES (NULL);
+INSERT INTO Aliases (HostID, Alias) VALUES (1, 'rhokz.com');
+INSERT INTO Aliases (HostID, Alias) VALUES (1, 'www.rhokz.com');
+INSERT INTO Paths (HostID, ParentID, Path, Consumer) VALUES (1, 0, '/', 'http-rhokz-process');
+INSERT INTO Paths (HostID, ParentID, Path, Consumer) VALUES (1, 0, '/static/', 'http-rhokz-static');
+COMMIT;
+
+

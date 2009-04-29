@@ -1,0 +1,40 @@
+The RQ-HTTP protocol is multi-layered.  This means that some commands contain a series of other commands.
+Even though we have multiple layers, we will use the same number set throughout.  We will just have different processors.
+
+When a connection is established, the browser client will immediately send a GET/POST/HEAD/* request followed by a number 
+of headers, and then depending on some of the headers, can then be followed by data.
+
+Some requests may even be mime-encoded, which means that we will need to process that also.
+
+A typical request being send to a consumer would be.
+
+CLEAR
+HOST <host>
+REMOTE_HOST <ip>
+PATH <url>
+METHOD_GET (or METHOD_POST or METHOD_HEAD)
+ENCODING <gzip>
+LANGUAGE <en-us>
+HEADERS
+	HEADER <header>
+	EXECUTE
+	HEADER <header>
+	EXECUTE
+PARAMS
+	KEY <key>
+	VALUE <value>
+	EXECUTE
+	KEY <key>
+	VALUE <value>
+	EXECUTE
+FILE
+	LENGTH <filelength>
+	FILENAME <name>
+	EXECUTE
+
+EXECUTE
+
+
+
+
+This is quite a lot of data, and it would need to be processed as quickly as possible.

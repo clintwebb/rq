@@ -1,0 +1,3 @@
+The HTTP protocol handles authentication on a very basic level.  However, most websites dont use it anymore because it is 
+neither secure, nor practical to maintain.  Therefore we wont be supporting HTTP authentication at this stage.
+
