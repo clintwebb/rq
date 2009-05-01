@@ -95,26 +95,25 @@
 // large string (224 to 255)
 #define RQ_CMD_PAYLOAD          224
 
-typedef struct {
-	char *hostname;
-	int resolved[5];
-	int port;
-} rq_conn_t;
 
 typedef int queue_id_t;
 typedef int msg_id_t;
 
 typedef struct {
-	msg_id_t id;
-	char  type;
-	char  noreply;
-	expbuf_t data;
-	void *queue;
+	msg_id_t  id;
+	char      type;
+	char      noreply;
+	expbuf_t  data;
+	void     *queue;
 } rq_message_t;
 
 typedef struct {
 	char *queue;
 	queue_id_t qid;
+	char exclusive;
+	short int max;
+	unsigned char priority;
+	
 	void (*handler)(rq_message_t *msg, void *arg);
 	void *arg;
 } rq_queue_t;
@@ -151,12 +150,9 @@ typedef struct {
 } rq_data_t;
 
 typedef struct {
-	int handle;		// socket handle to the connected controller.
-	struct event event;
-	struct event_base *evbase;
 	risp_t *risp;
+	struct event_base *evbase;
 
-	expbuf_t in, out, readbuf, build;
 
 	// linked-list of our connections.  Only the one at the head is likely to be
 	// active (although it might not be).  When a connection is dropped or is
@@ -166,12 +162,34 @@ typedef struct {
 	// Linked-list of queues that this node is consuming.
 	list_t queues;
 
+} rq_t;
+
+
+typedef struct {
+	int handle;		// socket handle to the connected controller.
+	enum {
+		unknown,
+		connecting,
+		active,
+		closing,
+		inactive
+	} status;
+	struct event event;
+	rq_t *rq;
+	risp_t *risp;
+	
+	char *hostname;
+	int resolved[5];
+	int port;
+	
+	expbuf_t in, out, readbuf, build;
+	rq_data_t data;
+	
 	// linked-list of the messages that are being processed (on the head), and
 	// the empty messages that can be used (at the tail)
 	list_t messages;
 
-	rq_data_t data;
-} rq_t;
+} rq_conn_t;
 
 
 void rq_set_maxconns(int maxconns);
@@ -182,10 +200,9 @@ void rq_init(rq_t *rq);
 void rq_cleanup(rq_t *rq);
 void rq_setevbase(rq_t *rq, struct event_base *base);
 void rq_addcontroller(rq_t *rq, char *host, int port);
-int  rq_connect(rq_t *rq);
 void rq_settimeout(rq_t *rq, unsigned int msecs, void (*handler)(void *arg), void *arg);
 void rq_consume(rq_t *rq, char *queue, int max, int priority, int exclusive, void (*handler)(rq_message_t *msg, void *arg), void *arg);
-void rq_process(rq_t *rq);
+//void rq_process(rq_t *rq);
 
 void rq_message_init(rq_message_t *msg);
 void rq_message_clear(rq_message_t *msg);
