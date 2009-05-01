@@ -55,8 +55,8 @@ typedef struct {
 
 
 typedef struct {
-	rq_t              rq;
-	settings_t        *settings;
+	rq_t               rq;
+	settings_t         settings;
 	risp_t            *risp;
 	int                logfile;
 	int                modified;
@@ -183,7 +183,7 @@ void cmdClear(control_t *ptr)
 	ptr->op = LOG_CMD_NOP;
 	ptr->mask = 0;
  	
- 	if (ptr->settings->verbose > 1) printf("node: CLEAR\n");
+ 	if (ptr->settings.verbose > 1) printf("node: CLEAR\n");
 }
 
 
@@ -195,7 +195,7 @@ void cmdClear(control_t *ptr)
 void cmdExecute(control_t *ptr) 
 {
  	assert(ptr != NULL);
-	if (ptr->settings->verbose > 1) printf("node: EXECUTE (%d)\n", ptr->op);
+	if (ptr->settings.verbose > 1) printf("node: EXECUTE (%d)\n", ptr->op);
 
 	// here we check what the current operation is.
 	switch(ptr->op) {
@@ -219,7 +219,7 @@ void cmdSetLevel(control_t *ptr)
 {
  	assert(ptr != NULL);
 	ptr->op = LOG_CMD_SETLEVEL;
-	if (ptr->settings->verbose > 1) printf("node: SETLEVEL\n");
+	if (ptr->settings.verbose > 1) printf("node: SETLEVEL\n");
 }
 
 void cmdLevel(control_t *ptr, risp_int_t value)
@@ -230,7 +230,7 @@ void cmdLevel(control_t *ptr, risp_int_t value)
 	ptr->level = value;
 	BIT_SET(ptr->mask, LOG_DATA_MASK_LEVEL);
 	
-	if (ptr->settings->verbose > 1) printf("node: LEVEL %d\n", value);
+	if (ptr->settings.verbose > 1) printf("node: LEVEL %d\n", value);
 }
 
 void cmdTime(control_t *ptr, risp_int_t value)
@@ -240,7 +240,7 @@ void cmdTime(control_t *ptr, risp_int_t value)
 	ptr->time = value;
 	BIT_SET(ptr->mask, LOG_DATA_MASK_TIME);
 	
-	if (ptr->settings->verbose > 1) printf("node: TIME %d\n", value);
+	if (ptr->settings.verbose > 1) printf("node: TIME %d\n", value);
 }
 
 void cmdText(control_t *ptr, risp_length_t length, risp_char_t *data)
@@ -253,7 +253,7 @@ void cmdText(control_t *ptr, risp_length_t length, risp_char_t *data)
 	BIT_SET(ptr->mask, LOG_DATA_MASK_TEXT);
 	ptr->op = LOG_CMD_TEXT;
 	
-	if (ptr->settings->verbose > 1) printf("node: TEXT <%d>\n", length);
+	if (ptr->settings.verbose > 1) printf("node: TEXT <%d>\n", length);
 }
 
 
@@ -312,7 +312,7 @@ void control_init(control_t *control)
 {
 	assert(control != NULL);
 
-	control->settings = NULL;
+	settings_init(&control->settings);
 	control->risp = NULL;
 	control->logfile = INVALID_HANDLE;
 	control->modified = 0;
@@ -332,6 +332,7 @@ void control_cleanup(control_t *control)
 	}
 	expbuf_free(&control->text);
 	rq_cleanup(&control->rq);
+	settings_cleanup(&control->settings);
 }
 
 
@@ -465,32 +466,27 @@ int main(int argc, char **argv)
 	control_init(control);
 
 	
-	// create and init settings
-	control->settings = (settings_t *) malloc(sizeof(settings_t));
-	assert(control->settings != NULL);
-	settings_init(control->settings);
-
 	// process arguments
-	process_args(control->settings, argc, argv);
+	process_args(&control->settings, argc, argv);
 
 	// check that we have all our required settings.
-	if (control->settings->primary == NULL) {
+	if (control->settings.primary == NULL) {
 		fprintf(stderr, "Need a primary controller specified.\n");
 		exit(EXIT_FAILURE);
 	}
-	if (control->settings->path == NULL) {
+	if (control->settings.path == NULL) {
 		fprintf(stderr, "Need to specify a path for the logs.\n");
 		exit(EXIT_FAILURE);
 	}
-	if (control->settings->queue == NULL) {
-		control->settings->queue = "logger";
+	if (control->settings.queue == NULL) {
+		control->settings.queue = "logger";
 	}
 
 	// If we need to run as a daemon, then do so, dropping privs to a specific
 	// username if it was specified, and creating a pid file, if that was
 	// specified.
-	if (control->settings->daemonize) {
-		if (rq_daemon(control->settings->username, control->settings->pid_file, control->settings->verbose) != 0) {
+	if (control->settings.daemonize) {
+		if (rq_daemon(control->settings.username, control->settings.pid_file, control->settings.verbose) != 0) {
 			fprintf(stderr, "failed to daemon() in order to daemonize\n");
 			exit(EXIT_FAILURE);
 		}
@@ -502,20 +498,20 @@ int main(int argc, char **argv)
 
 	control->req = NULL;
 
-	if (control->settings->verbose) printf("Initialising the event system.\n");
+	if (control->settings.verbose) printf("Initialising the event system.\n");
 	assert(main_event_base == NULL);
 	main_event_base = event_init();
 	rq_setevbase(&control->rq, main_event_base);
 
-	if (control->settings->verbose) printf("Adding controller: %s:%d\n", control->settings->primary, control->settings->priport);
-	assert(control->settings->primary != NULL);
-	assert(control->settings->priport > 0);
-	rq_addcontroller(&control->rq, control->settings->primary, control->settings->priport);
+	if (control->settings.verbose) printf("Adding controller: %s:%d\n", control->settings.primary, control->settings.priport);
+	assert(control->settings.primary != NULL);
+	assert(control->settings.priport > 0);
+	rq_addcontroller(&control->rq, control->settings.primary, control->settings.priport);
 
-	if (control->settings->secondary != NULL) {
-		if (control->settings->verbose) printf("Adding controller: %s:%d\n", control->settings->secondary, control->settings->secport);
-		assert(control->settings->secport > 0);
-		rq_addcontroller(&control->rq, control->settings->secondary, control->settings->secport);
+	if (control->settings.secondary != NULL) {
+		if (control->settings.verbose) printf("Adding controller: %s:%d\n", control->settings.secondary, control->settings.secport);
+		assert(control->settings.secport > 0);
+		rq_addcontroller(&control->rq, control->settings.secondary, control->settings.secport);
 	}
 
 	// Initialise the risp system.
@@ -531,20 +527,10 @@ int main(int argc, char **argv)
 	risp_add_command(control->risp, LOG_CMD_TEXT,        &cmdText);
 
 
-	// connect to other controller.
-	assert(control->settings->primary != NULL);
-	assert(control != NULL);
-	if (control->settings->verbose) printf("Connecting to controller\n");
-	if (rq_connect(&control->rq) != 0) {
-		fprintf(stderr, "Unable to connect to controller.\n");
-		exit(EXIT_FAILURE);
-	}
-
-
 	// tell RQ that we want a timeout event after 1000 miliseconds (1 second);
 	// this is a one-time timeout, so when handling it, will need to set another.
 	assert(control != NULL);
-	if (control->settings->verbose) printf("Setting 1 second timeout\n");
+	if (control->settings.verbose) printf("Setting 1 second timeout\n");
 	rq_settimeout(&control->rq, 1000, timeout_handler, control);
 	
 	
@@ -553,13 +539,11 @@ int main(int argc, char **argv)
 	// queues.  We can do this because both queues use compatible message
 	// structures.
 	assert(control != NULL);
-	assert(control->settings != NULL);
-	assert(control->settings->queue != NULL);
-	if (control->settings->verbose) printf("Consuming queue: %s\n", control->settings->queue);
-
-	rq_consume(&control->rq, control->settings->queue, 2, RQ_PRIORITY_NORMAL, 1, message_handler, control);
-	if (control->settings->levelsqueue != NULL) {
-		rq_consume(&control->rq, control->settings->levelsqueue, 0, RQ_PRIORITY_NONE, 0, message_handler, control);
+	assert(control->settings.queue != NULL);
+	if (control->settings.verbose) printf("Consuming queue: %s\n", control->settings.queue);
+	rq_consume(&control->rq, control->settings.queue, 2, RQ_PRIORITY_NORMAL, 1, message_handler, control);
+	if (control->settings.levelsqueue != NULL) {
+		rq_consume(&control->rq, control->settings.levelsqueue, 0, RQ_PRIORITY_NONE, 0, message_handler, control);
 	}
 	
 	// enter the processing loop.  This function will not return until there is
@@ -567,10 +551,11 @@ int main(int argc, char **argv)
 	// everything needs to be setup and running before this point.  Once inside
 	// the rq_process function, everything is initiated by the RQ event system.
 	assert(control != NULL);
-	if (control->settings->verbose) printf("Starting RQ Process\n");
-	rq_process(&control->rq);
+	assert(control->rq.evbase);
+	if (control->settings.verbose) printf("Starting event loop\n");
+	event_base_loop(control->rq.evbase, 0);
 
-	if (control->settings->verbose) printf("\nShutting down\n");
+	if (control->settings.verbose) printf("\nShutting down\n");
 
 	// cleanup risp library.
 	assert(control != NULL);
@@ -579,18 +564,12 @@ int main(int argc, char **argv)
 	control->risp = NULL;
 
 	// remove the PID file if we're a daemon
-	if (control->settings->daemonize && control->settings->pid_file != NULL) {
-		assert(control->settings->pid_file[0] != 0);
-		unlink(control->settings->pid_file);
+	if (control->settings.daemonize && control->settings.pid_file != NULL) {
+		assert(control->settings.pid_file[0] != 0);
+		unlink(control->settings.pid_file);
 	}
 
-	// clean up the settings object and free it.
-	assert(control->settings != NULL);
-	settings_cleanup(control->settings);
-	assert(control->settings != NULL);
-	free(control->settings);
-	control->settings = NULL;
-
+	// req should only have a value when in the middle of processing a request.
 	assert(control->req == NULL);
 
   // clean up the 'control' structure, closing any handles that are still open.
