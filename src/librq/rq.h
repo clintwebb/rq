@@ -14,6 +14,11 @@
 // effect logic.
 #define __LIBRQ_VERSION  0x01
 
+
+#if (LIBEVENT_VERSION_NUMBER < 0x02000100)
+	#error "Needs libEvent v2.00.01 or higher"
+#endif
+
 /* Get a consistent bool type */
 #if HAVE_STDBOOL_H
 # include <stdbool.h>
@@ -166,7 +171,7 @@ typedef struct {
 
 
 typedef struct {
-	int handle;		// socket handle to the connected controller.
+	evutil_socket_t handle;		// socket handle to the connected controller.
 	enum {
 		unknown,
 		connecting,
@@ -174,7 +179,7 @@ typedef struct {
 		closing,
 		inactive
 	} status;
-	struct event event;
+	struct event *event;
 	rq_t *rq;
 	risp_t *risp;
 	
