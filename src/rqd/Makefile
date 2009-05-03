@@ -50,7 +50,7 @@ node.o: node.c $(H_node) $(H_data) $(H_stats) $(H_queue) $(H_actions)
 process.o: process.c $(H_process) $(H_send) $(H_queue) $(H_message) $(H_stats)
 	gcc -c -o $@ $(ARGS) process.c
 
-queue.o: queue.c $(H_queue) $(H_server) $(H_send)
+queue.o: queue.c $(H_queue) $(H_server) $(H_send) $(H_actions)
 	gcc -c -o $@ $(ARGS) queue.c
 
 rqd.o: rqd.c daemon.h $(H_actions) $(H_commands) $(H_server) $(H_settings) $(H_stats) $(H_system_data)

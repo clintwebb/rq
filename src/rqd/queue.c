@@ -1,5 +1,6 @@
 
 
+#include "actions.h"
 #include "queue.h"
 #include "send.h"
 #include "server.h"
@@ -189,8 +190,7 @@ void queue_cancel_node(node_t *node)
 	assert(node->sysdata->queues);
 
 	next_queue = ll_start(node->sysdata->queues);
-	queue = ll_next(node->sysdata->queues, &next_queue);
-	while (queue) {
+	while ((queue = ll_next(node->sysdata->queues, &next_queue))) {
 		assert(queue->qid > 0);
 		assert(queue->name);
 
@@ -304,10 +304,25 @@ void queue_cancel_node(node_t *node)
 			}
 		}
 		
-		queue = ll_next(node->sysdata->queues, &next_queue);
-
-		// even though the node is being removed from the queue, if there are no more nodes, and there are no messages in the queue, then the queue needs to be deleted.
-		assert(0);
+		// the node has being removed from the queue, if there are no more nodes, and there are no messages in the queue, then the queue needs to be deleted.
+		if (ll_count(&queue->nodes_busy) <= 0 && ll_count(&queue->nodes_ready) == 0) {
+			if (ll_count(&queue->nodes_waiting) > 0) {
+				// we dont have any active nodes anymore, but we have a waiting node... we need to activate the waiting node.
+				assert(0);
+			}
+			else {
+				// this queue has no nodes at all, not even any waiting to start up exclusively.
+				if (ll_count(&queue->msg_pending) <= 0 && ll_count(&queue->msg_proc) <= 0) {
+					action_t *action;
+					assert(node->sysdata->actpool);
+					action = action_pool_new(node->sysdata->actpool);
+					action_set(action, 0, ah_queue_shutdown, queue);
+				}
+				else {
+					// but it does have messages waiting to be deliverd... so we wont delete the queue just yet.
+				}
+			}
+		}
 	}
 }
 

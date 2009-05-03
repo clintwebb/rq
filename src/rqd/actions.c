@@ -166,7 +166,7 @@ void ah_node_shutdown(action_t *action)
 	}
 
 	// need to pay more attention to the lists here.  Something has closed, so one of the lists is no longer valid, need to determine what.
-	assert(0);
+// 	assert(0);
 
 	// We are still connected to the node, so we need to put a timeout on the
 	// messages the node is servicing.
@@ -263,7 +263,17 @@ void ah_queue_shutdown(action_t *action)
 
 
 	// delete the list of nodes that are consuming this queue.
-	assert(0);   // code needs to be changed.
+	if (ll_count(&queue->nodes_busy) > 0) {
+		assert(0);
+	}
+
+	if (ll_count(&queue->nodes_ready) > 0) {
+		assert(0);
+	}
+
+	if (ll_count(&queue->nodes_waiting) > 0) {
+		assert(0);
+	}
 	
 	// Delete the queue from the queue list.
 	ll_remove(sysdata->queues, queue, NULL);
