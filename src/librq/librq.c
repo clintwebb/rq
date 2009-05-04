@@ -74,6 +74,7 @@ int rq_new_socket(struct addrinfo *ai) {
 	
 	// bind the socket, and then set the socket to non-blocking mode.
 	if ((sfd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol)) >= 0) {
+		// TODO: use libevent non-blocking function instead.
 		if ((flags = fcntl(sfd, F_GETFL, 0)) < 0 || fcntl(sfd, F_SETFL, flags | O_NONBLOCK) < 0) {
 			perror("setting O_NONBLOCK");
 			close(sfd);
@@ -446,27 +447,31 @@ static void rq_process_read(rq_conn_t *conn)
 	assert(conn->readbuf.length == 0);
 }
 
-
-static void rq_process_write(rq_conn_t *conn)
+static void rq_write_handler(int fd, short int flags, void *arg)
 {
+	rq_conn_t *conn = (rq_conn_t *) arg;
+
+	assert(fd >= 0);
+	assert(flags != 0);
 	assert(conn);
-
-	// if we are doing the WRITE, but there is nothing in our buffer to write,
-	// that means we have just connected, and we need to issue our consume
-	// requests.
-	assert(conn->out.length == 0);
-
+	assert(conn->rq);
+	assert(conn->handle == fd);
+	assert(conn->status == active);
+	assert(flags & EV_WRITE);
+	assert(conn->write_event);
+	
+	// incomplete
+	assert(0);
 
 	// if we dont have any more to send, then we need to remove the WRITE event.
 	if (conn->out.length == 0) {
-		assert(conn->event);
-		if (event_del(conn->event) != -1) {
-			assert(conn->handle != INVALID_HANDLE && conn->handle > 0);
-			event_set(conn->event, conn->handle, EV_READ | EV_PERSIST, rq_process_handler, (void *)conn);
-			event_add(conn->event, 0);
+		if (event_del(conn->write_event) != -1) {
+			event_free(conn->write_event);
+			conn->write_event = NULL;
 		}
 	}
 }
+
 
 
 // this function is used internally to send the data to the connected RQ
@@ -486,30 +491,17 @@ static void rq_senddata(rq_conn_t *conn, char *data, int length)
 	assert(conn->handle != INVALID_HANDLE);
 
 	// if the out buffer is empty, then we will try and send what we've got straight away.
-	if (conn->out.length == 0) {
+	if (conn->status == active && conn->out.length == 0) {
 		res = send(conn->handle, data, length, 0);
 		if (res > 0) {
 			assert(res <= length);
 		}
 		else 	if (res == 0) {
-			// socket was closed.   how best to handle that?
-			event_del(conn->event);
-			event_free(conn->event);
-			conn->event = NULL;
-			conn->handle = INVALID_HANDLE;
-
-			assert(0);
+			goto err;
 		}
 		else if (res == -1) {
 			if (errno != EAGAIN && errno != EWOULDBLOCK) {
-				// we've had a failure.
-				close(conn->handle);
-				event_del(conn->event);
-				event_free(conn->event);
-				conn->event = NULL;
-				conn->handle = INVALID_HANDLE;
-
-				assert(0);
+				goto err;
 			}
 		}
 	}
@@ -520,13 +512,17 @@ static void rq_senddata(rq_conn_t *conn, char *data, int length)
 		// there is already data in the out queue...
 		if (res < 0) { res = 0; }
 		expbuf_add(&conn->out, data+res, length-res);
-		assert(conn->event);
-		if (event_del(conn->event) != -1) {
-			assert(conn->handle != INVALID_HANDLE && conn->handle > 0);
-			event_set(conn->event, conn->handle, EV_READ | EV_WRITE | EV_PERSIST, rq_process_handler, (void *)conn);
-			event_add(conn->event, 0);
-		}
-	}	
+		assert(conn->read_event);
+		assert(conn->write_event == NULL);
+		conn->write_event = event_new(conn->rq->evbase, conn->handle, EV_WRITE | EV_PERSIST, rq_write_handler, conn);
+		event_add(conn->write_event, NULL);
+	}
+
+	return;
+
+err:
+	close(conn->handle);
+	rq_conn_closed(conn);
 }
 
 
@@ -561,8 +557,7 @@ static void rq_send_consume(rq_conn_t *conn, rq_queue_t *queue)
 }
 
 
-
-static void rq_process_handler(int fd, short int flags, void *arg)
+static void rq_read_handler(int fd, short int flags, void *arg)
 {
 	rq_conn_t *conn = (rq_conn_t *) arg;
 	rq_queue_t *q;
@@ -572,48 +567,58 @@ static void rq_process_handler(int fd, short int flags, void *arg)
 	assert(flags != 0);
 	assert(conn);
 	assert(conn->rq);
-
-
-	// check the status of the conn.  If it is 'connecting' and we got a EV_WRITE, then the connection has completed.
-	if (conn->status == connecting) {
-		assert(flags & EV_WRITE);
-
-		printf("connected.\n");
-		
-		conn->status = active;
-
-		// if we have data in our out buffer, we can keep the WRITE, otherwise we reset the event for READ.
-		if (conn->out.length <= 0) {
-			assert(conn->rq->evbase != NULL);
-			assert(conn->handle != INVALID_HANDLE && conn->handle > 0);
-			assert(conn->event);
-			event_set(conn->event, conn->handle, (EV_READ | EV_PERSIST), rq_process_handler, (void *)conn);
-			event_add(conn->event, NULL);
-		}
-
-		// now that we have an active connection, we need to send our queue requests.
-		next = ll_start(&conn->rq->queues);
-		while (q = ll_next(&conn->rq->queues, &next)) {
-			rq_send_consume(conn, q);
-		}
-	}
-
-	if (flags & EV_READ) {
-		rq_process_read(conn);
-	}
+	assert(conn->status == active);
+	assert(flags & EV_READ);
 	
-	if (flags & EV_WRITE) {
-		rq_process_write(conn);
-	}
-	
+	rq_process_read(conn);
 }
 
 
 
+static void rq_connect_handler(int fd, short int flags, void *arg)
+{
+	rq_conn_t *conn = (rq_conn_t *) arg;
+	rq_queue_t *q;
+	void *next;
 
+	assert(fd >= 0);
+	assert(flags != 0);
+	assert(conn);
+	assert(conn->rq);
+	assert(conn->handle == fd);
 
+	assert(flags & EV_WRITE);
 
+	printf("connected.\n");
+		
+	assert(conn->status == connecting);
+	conn->status = active;
 
+	// remove the connect handler, and apply the regular read handler now.
+	assert(conn->rq->evbase != NULL);
+	assert(conn->read_event);
+	
+	event_del(conn->read_event);
+	conn->read_event = event_new(conn->rq->evbase, conn->handle, EV_READ | EV_PERSIST, rq_read_handler, conn);
+	event_add(conn->read_event, NULL);
+
+	// if we have data in our out buffer, we need to create the WRITE event.
+	if (conn->out.length > 0) {
+		assert(conn->handle != INVALID_HANDLE && conn->handle > 0);
+		assert(conn->write_event == NULL);
+		conn->write_event = event_new(conn->rq->evbase, conn->handle, EV_WRITE | EV_PERSIST, rq_write_handler, conn);
+		event_add(conn->write_event, NULL);
+	}
+
+	// now that we have an active connection, we need to send our queue requests.
+	next = ll_start(&conn->rq->queues);
+	while (q = ll_next(&conn->rq->queues, &next)) {
+		rq_send_consume(conn, q);
+	}
+
+	// just in case there is some data there already.
+	rq_process_read(conn);
+}
 
 
 
@@ -649,7 +654,8 @@ static void rq_connect(rq_t *rq)
 		assert(conn->hostname != NULL);
 		assert(conn->hostname[0] != '\0');
 		assert(conn->port > 0);
-		assert(conn->event == NULL);
+		assert(conn->read_event == NULL);
+		assert(conn->write_event == NULL);
 
 		// if the hostname hasn't been resolved, then resolve it.
 		if (conn->resolved[0] == 0) {
@@ -700,10 +706,11 @@ static void rq_connect(rq_t *rq)
 						// setup the event handler.
 						assert(rq->evbase);
 						assert(conn->handle != INVALID_HANDLE && conn->handle > 0);
-						assert(conn->event == NULL);
+						assert(conn->read_event == NULL);
+						assert(conn->write_event == NULL);
 						
-						conn->event = event_new(rq->evbase, conn->handle, (EV_READ | EV_PERSIST), rq_process_handler, conn);
-						event_add(conn->event, NULL);
+						conn->read_event = event_new(rq->evbase, conn->handle, (EV_WRITE | EV_PERSIST), rq_connect_handler, conn);
+						event_add(conn->read_event, NULL);
 					}
 					else {
 						printf("-- connect failed. result=%d, errno=%d\n", result, errno);
@@ -759,7 +766,8 @@ void rq_addcontroller(rq_t *rq, char *host, int port)
 	}
 
 	conn->handle = INVALID_HANDLE;		// socket handle to the connected controller.
-	conn->event = NULL;
+	conn->read_event = NULL;
+	conn->write_event = NULL;
 
 	expbuf_init(&conn->readbuf, RQ_DEFAULT_BUFFSIZE);
 	expbuf_init(&conn->in, 0);

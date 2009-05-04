@@ -103,7 +103,7 @@ queue_t * queue_get_name(list_t *queues, const char *qname)
 	next = ll_start(queues);
 	tmp = ll_next(queues, &next);
 	while (tmp) {
-		assert(tmp->name != NULL);
+		assert(tmp->name);
 		assert(tmp->qid > 0);
 
 		if (strcmp(tmp->name, qname) == 0) {
@@ -330,7 +330,7 @@ void queue_cancel_node(node_t *node)
 
 queue_t * queue_create(system_data_t *sysdata, char *qname)
 { 
-	queue_t *q;
+	queue_t *q, *tmp;
 
 	assert(sysdata);
 	assert(qname);
@@ -339,11 +339,15 @@ queue_t * queue_create(system_data_t *sysdata, char *qname)
 	q = (queue_t *) malloc(sizeof(queue_t));
 	queue_init(q);
 
-	// determine the next queue id.
-	if (sysdata->queues)
-		q->qid = ((queue_t *)sysdata->queues)->qid + 1;
-	else
+	// look at the qid for the queue that is currently at the top of the list and set ours +1.
+	tmp = ll_get_head(sysdata->queues);
+	if (tmp) {
+		assert(tmp->qid > 0);
+		q->qid = tmp->qid + 1;
+	}
+	else {
 		q->qid = 1;
+	}
 	assert(q->qid > 0);
 
 	// ok, we should now have a 'q' pointer, so we should assign some data to it.

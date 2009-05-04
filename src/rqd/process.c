@@ -17,7 +17,7 @@
 void processRequest(node_t *node)
 {
 	message_t *msg;
-	queue_t *q, *tmp;
+	queue_t *q;
 	stats_t *stats;
 
 	assert(node);
@@ -86,16 +86,7 @@ void processRequest(node_t *node)
 	
 		if (q == NULL) {
 			// we dont have a queue, so we will need to create one.
-			q = (queue_t *) malloc(sizeof(queue_t));
-			queue_init(q);
-
-			// look at the qid for the queue that is currently at the top of the list and set ours +1.
-			tmp = ll_get_head(node->sysdata->queues);
-			if (tmp) { q->qid = tmp->qid + 1; }
-			else { q->qid = 1; }
-
-			// add the queue to the queue list.
-			ll_push_head(node->sysdata->queues, q);
+			q = queue_create(node->sysdata, expbuf_string(&node->data.queue));
 		}
 		assert(q);
 		assert(ll_count(node->sysdata->queues) > 0);
@@ -103,6 +94,7 @@ void processRequest(node_t *node)
 		// add the message to the queue.
 
 		if (node->sysdata->verbose > 1) printf("processRequest: node:%d, msg_id:%d, q:%d\n", node->handle, msg->id, q->qid);
+		assert(q->sysdata);
 		queue_addmsg(q, msg);
 
 		stats = node->sysdata->stats;
@@ -184,12 +176,10 @@ void processConsume(node_t *node)
 		}
 
 	
-		// need to check the queue to see if there are messages pending.  If there are, then send some to this node.
+		// need to check the queue to see if there are messages pending.  If there
+		// are, then send some to this node.
 		if (ll_count(&q->msg_pending) > 0) {
-	
-			// not done.
-			assert(0);
-	
+			queue_deliver(q);
 		}
 	}
 }

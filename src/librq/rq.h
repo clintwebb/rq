@@ -179,7 +179,7 @@ typedef struct {
 		closing,
 		inactive
 	} status;
-	struct event *event;
+	struct event *read_event, *write_event;
 	rq_t *rq;
 	risp_t *risp;
 	
@@ -207,7 +207,7 @@ void rq_setevbase(rq_t *rq, struct event_base *base);
 void rq_addcontroller(rq_t *rq, char *host, int port);
 void rq_settimeout(rq_t *rq, unsigned int msecs, void (*handler)(void *arg), void *arg);
 void rq_consume(rq_t *rq, char *queue, int max, int priority, int exclusive, void (*handler)(rq_message_t *msg, void *arg), void *arg);
-//void rq_process(rq_t *rq);
+
 
 void rq_message_init(rq_message_t *msg);
 void rq_message_clear(rq_message_t *msg);

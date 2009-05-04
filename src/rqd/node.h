@@ -21,7 +21,7 @@
 typedef struct {
 	int handle;
 	unsigned short flags;
-	struct event event;
+	struct event *read_event, *write_event;
 	expbuf_t *in, *waiting, *out, *build;
 	data_t data;
 	system_data_t *sysdata;
@@ -34,8 +34,8 @@ void node_init(node_t *node, system_data_t *sysdata);
 void node_free(node_t *node);
 
 void node_write_now(node_t *node, int length, char *data);
-void node_event_handler(int hid, short flags, void *data);
-
+void node_read_handler(int hid, short flags, void *data);
+void node_write_handler(int hid, short flags, void *data);
 
 #endif
 

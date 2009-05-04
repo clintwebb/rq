@@ -287,18 +287,14 @@ void server_event_handler(int hid, short flags, void *data)
 	else {
 		// mark socket as non-blocking
 		if (server->sysdata->verbose > 1) printf(" -- node(%d) setting non-blocking mode\n", sfd);
-		if ((flags = fcntl(sfd, F_GETFL, 0)) < 0 || fcntl(sfd, F_SETFL, flags | O_NONBLOCK) < 0) {
-				perror("setting O_NONBLOCK");
-				close(sfd);
-				// TODO: There are more things we should do to recover from this....  this is kinda bad, but unlikely to happen.
-		}
+		evutil_make_socket_nonblocking(sfd);
 		
 		// setup the event handling...
 		if (server->sysdata->verbose > 1) printf(" -- node(%d) setting read event flags\n", sfd);
 		assert(server->sysdata->evbase != NULL);
-		event_set(&node->event, sfd, EV_READ | EV_PERSIST, node_event_handler, (void *)node);
-		event_base_set(server->sysdata->evbase, &node->event);
-		event_add(&node->event, 0);
+		assert(node->read_event == NULL);
+		node->read_event = event_new(server->sysdata->evbase, sfd, EV_READ | EV_PERSIST, node_read_handler, (void *)node);
+		event_add(node->read_event, 0);
 
 		// add the node to the nodelist.
 		ll_push_head(&server->nodelist, node);

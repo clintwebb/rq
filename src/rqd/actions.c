@@ -201,9 +201,9 @@ void ah_node_shutdown(action_t *action)
 			node->handle = INVALID_HANDLE;
 
 			assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE));
-			assert(node->event.ev_base != NULL);
-			event_del(&node->event);
-			BIT_SET(node->flags, FLAG_NODE_ACTIVE);
+			assert(node->read_event);
+			event_del(node->read_event);
+			BIT_CLEAR(node->flags, FLAG_NODE_ACTIVE);
 
 			node->refcount --;
 

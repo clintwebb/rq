@@ -49,7 +49,8 @@ void node_init(node_t *node, system_data_t *sysdata)
 	node->refcount = 0;
 	
 	assert(node->handle == INVALID_HANDLE);
-	memset(&node->event, 0, sizeof(node->event));
+	node->read_event = NULL;
+	node->write_event = NULL;
 }
 
 
@@ -68,15 +69,18 @@ void node_free(node_t *node)
 	assert(sysdata->bufpool != NULL);
 	assert(node->refcount == 0);
 	
-	if (BIT_TEST(node->flags, FLAG_NODE_ACTIVE)) {
-		assert(node->event.ev_base != NULL);
-		event_del(&node->event);
-	}
-	
 	node->flags = 0;
 	
 	assert(node->handle == INVALID_HANDLE);
-	memset(&node->event, 0, sizeof(node->event));
+	
+	if (node->read_event)  {
+		event_del(node->read_event);
+		event_free(node->read_event);
+		node->read_event = NULL;
+	}
+
+	assert(node->write_event == NULL);
+	
 
 	// delete the expanding buffers.
 	assert(node->in);
@@ -161,8 +165,9 @@ static void node_closed(node_t *node)
 	
 	// need to cancel the event.
 	if (BIT_TEST(node->flags, FLAG_NODE_ACTIVE)) {
-		assert(node->event.ev_base != NULL);
-		event_del(&node->event);
+		event_del(node->read_event);
+		event_free(node->read_event);
+		node->read_event = NULL;
 		BIT_CLEAR(node->flags, FLAG_NODE_ACTIVE);
 	}
 
@@ -175,20 +180,101 @@ static void node_closed(node_t *node)
 }
 
 
+
+
+
+
 //-----------------------------------------------------------------------------
-// read all the data from the socket, and process it.  It will keep reading
-// until there is no more to read.  If there is any data that couldn't be
-// processed, then it gets added to a buffer.
-static void node_read(node_t *node)
+// write out data to the socket.  If we have data waiting in the 'out' buffer,
+// then we will just add this data to it.  If the out buffer is empty, then we
+// will attempt to send this to the socket now.  If there is any data that
+// wasn't sent, then it will be put in the out-buffer.
+void node_write_now(node_t *node, int length, char *data)
 {
+	stats_t *stats;
+	int res;
+	
+	assert(node);
+	assert(length > 0);
+	assert(data);
+
+	assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE));
+	assert(node->sysdata);
+	assert(node->sysdata->stats);
+	assert(node->sysdata->bufpool);
+	
+	stats = node->sysdata->stats;
+
+	assert(node->out);
+	if (node->out && node->out->length > 0) {
+		// we already have data in the outbuffer, so we will add this new data to
+		// it, and wait for the event to fire.
+		assert(node->write_event);
+		expbuf_add(node->out, data, length);
+	}
+	else {
+		// nothing already in the out-buffer, so we can try and send it now.
+
+		assert(node->handle != INVALID_HANDLE);
+		res = send(node->handle, data, length, 0);
+		if (res > 0) {
+			// we managed to send some, or maybe all....
+			assert(res <= length);
+			stats->out_bytes += res;
+			if (res < length) {
+				// not everything was sent, so we need to put the remainder in the 'out' queue.
+				expbuf_add(node->out, &data[res], length-res);
+				assert(node->out->length > 0);
+			
+				// we have ended up with data in the out-buffer, so we need to set the
+				// event so that we can be notified when it is safe to send more.
+				assert(node->write_event == NULL);
+				assert(node->sysdata->evbase);
+				node->write_event = event_new(node->sysdata->evbase, node->handle, EV_WRITE | EV_PERSIST, node_write_handler, (void *)node);
+				event_add(node->write_event, 0);
+			}
+		}
+		else if (res == 0) {
+			if (node->sysdata->verbose > 1)
+				printf("Node[%d] closed while writing.\n", node->handle);
+			node->handle = INVALID_HANDLE;
+			node_closed(node);
+			assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE) == 0);
+		}
+		else {
+			assert(res == -1);
+			if (errno != EAGAIN && errno != EWOULDBLOCK) {
+				if (node->sysdata->verbose > 1)
+					printf("Node[%d] closed while writing - because of error: %d\n", node->handle, errno);
+				close(node->handle);
+				node->handle = INVALID_HANDLE;
+				node_closed(node);
+				assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE) == 0);
+			}
+		}
+	}
+}
+
+
+
+//-----------------------------------------------------------------------------
+// this function is called when we have received data on our node socket.
+void node_read_handler(int hid, short flags, void *data)
+{
+	node_t *node = (node_t *) data;
 	int res, empty;
 	stats_t *stats;
 
-	assert(node != NULL);
-	assert(node->sysdata != NULL);
-	assert(node->sysdata->stats != NULL);
-	assert(node->sysdata->bufpool != NULL);
+	assert(hid >= 0);
+	assert(node);
+	assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE));
+	assert(node->sysdata);
+	assert(node->handle == hid);
+	assert(flags & EV_READ);
+	assert(node->sysdata->stats);
+	assert(node->sysdata->bufpool);
 	assert(node->in);
+	assert(node->read_event);
 
 	stats = node->sysdata->stats;
 
@@ -204,7 +290,7 @@ static void node_read(node_t *node)
 			stats->in_bytes += res;
 			node->in->length = res;
 
-			// if we pulled out the max we had avail in our buffer, that means we can pull out more at a time.
+			// if we pulled out the max we had avail in our buffer, that means we can pull out more at a time, so increase our incoming buffer.
 			if (res == node->in->max) {
 				expbuf_shrink(node->in, node->in->max + DEFAULT_BUFFSIZE);
 				assert(empty == 0);
@@ -273,13 +359,19 @@ static void node_read(node_t *node)
 // couldn't be sent before by node_write_now()).  It will try and send
 // everything in one go, and if it succeeds, then it will clear the 'write'
 // event.
-static void node_write(node_t *node)
+void node_write_handler(int hid, short flags, void *data)
 {
+	node_t *node = (node_t *) data;
 	stats_t *stats;
 	int res;
-	
+
+	assert(hid >= 0);
 	assert(node);
+	assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE));
 	assert(node->sysdata);
+	assert(node->handle == hid);
+	assert(flags & EV_WRITE);
+	assert(node->write_event);
 
 	stats = node->sysdata->stats;
 	assert(stats);
@@ -289,8 +381,7 @@ static void node_write(node_t *node)
 	assert(node->out->length > 0);
 	assert(node->out->length <= node->out->max);
 	assert(node->out->data);
-	assert(node->handle > 0);
-	assert(node->handle != INVALID_HANDLE);
+	assert(node->handle > 0 && node->handle != INVALID_HANDLE);
 	assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE));
 
 	res = send(node->handle, node->out->data, node->out->length, 0);
@@ -300,16 +391,12 @@ static void node_write(node_t *node)
 		stats->out_bytes += res;
 		expbuf_purge(node->out, res);
 
-		// if we have sent everything, then we dont need to wait for a WRITE event
-		// anymore, so we need to re-establish the events with only the READ flag.
+		// if we have sent everything, then we can remove the write event for this node.
 		assert(node->out != NULL);
 		if (node->out->length == 0) {
-			if (event_del(&node->event) != -1) {
-				assert(node->handle != INVALID_HANDLE && node->handle > 0);
-				event_set(&node->event, node->handle, EV_READ | EV_PERSIST, node_event_handler, (void *)node);
-				event_base_set(node->event.ev_base, &node->event);
-				event_add(&node->event, 0);
-			}
+			event_del(node->write_event);
+			event_free(node->write_event);
+			node->write_event = NULL;
 		}
 	}
 	else if (res == 0) {
@@ -325,103 +412,5 @@ static void node_write(node_t *node)
 			node_closed(node);
 			assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE) == 0);
 		}
-	}
-}
-
-
-//-----------------------------------------------------------------------------
-// write out data to the socket.  If we have data waiting in the 'out' buffer,
-// then we will just add this data to it.  If the out buffer is empty, then we
-// will attempt to send this to the socket now.  If there is any data that
-// wasn't sent, then it will be put in the out-buffer.
-void node_write_now(node_t *node, int length, char *data)
-{
-	stats_t *stats;
-	int res;
-	
-	assert(node);
-	assert(length > 0);
-	assert(data);
-
-	assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE));
-	assert(node->sysdata);
-	assert(node->sysdata->stats);
-	assert(node->sysdata->bufpool);
-	
-	stats = node->sysdata->stats;
-
-	assert(node->out);
-	if (node->out && node->out->length > 0) {
-		// we already have data in the outbuffer, so we will add this new data to
-		// it, and wait for the event to fire.
-		expbuf_add(node->out, data, length);
-	}
-	else {
-		// nothing already in the out-buffer, so we can try and send it now.
-
-		assert(node->handle != INVALID_HANDLE);
-		res = send(node->handle, data, length, 0);
-		if (res > 0) {
-			// we managed to send some, or maybe all....
-			assert(res <= length);
-			stats->out_bytes += res;
-			if (res < length) {
-				// not everything was sent, so we need to put the remainder in the 'out' queue.
-				expbuf_add(node->out, &data[res], length-res);
-				assert(node->out->length > 0);
-			
-				// we have ended up with data in the out-buffer, so we need to set the
-				// event so that we can be notified when it is safe to send more.
-				if (event_del(&node->event) != -1) {
-					assert(node->handle > 0);
-					event_set(&node->event, node->handle, EV_WRITE | EV_READ | EV_PERSIST, node_event_handler, (void *)node);
-					event_base_set(node->event.ev_base, &node->event);
-					event_add(&node->event, 0);
-				}
-			}
-		}
-		else if (res == 0) {
-			if (node->sysdata->verbose > 1)
-				printf("Node[%d] closed while writing.\n", node->handle);
-			node->handle = INVALID_HANDLE;
-			node_closed(node);
-			assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE) == 0);
-		}
-		else {
-			assert(res == -1);
-			if (errno != EAGAIN && errno != EWOULDBLOCK) {
-				if (node->sysdata->verbose > 1)
-					printf("Node[%d] closed while writing - because of error: %d\n", node->handle, errno);
-				close(node->handle);
-				node->handle = INVALID_HANDLE;
-				node_closed(node);
-				assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE) == 0);
-			}
-		}
-	}
-}
-
-
-
-//-----------------------------------------------------------------------------
-// this function is called when we have received data on our node socket.
-void node_event_handler(int hid, short flags, void *data)
-{
-	node_t *node;
-	node = (node_t *) data;
-
-	assert(hid >= 0);
-	assert(node != NULL);
-	assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE));
-	assert(node->sysdata != NULL);
-	
-	assert(node->handle == hid);
-	
-	if (flags & EV_READ) {
-		node_read(node);
-	}
-		
-	if ((flags & EV_WRITE) && BIT_TEST(node->flags, FLAG_NODE_ACTIVE)) {
-		node_write(node);
 	}
 }
