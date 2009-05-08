@@ -14,6 +14,9 @@ typedef struct {
 	expbuf_pool_t *bufpool;
 	action_pool_t *actpool;
 	mempool_t *msgpool;
+
+	struct event *sighup_event;
+	struct event *sigint_event;
 	
 	int verbose;
 	void *settings;

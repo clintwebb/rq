@@ -35,7 +35,6 @@ void server_init(server_t *server, system_data_t *sysdata)
 
 	server->active = 0;
 	ll_init(&server->nodelist);
-	server->shutdown = 0;
 }
 
 
@@ -143,11 +142,16 @@ void server_listen(server_t *server, int port, char *address)
 				assert(server->sysdata->evbase != NULL);
 				
 				assert(server->servers[index].handle >= 0);
-				event_set(&server->servers[index].event, server->servers[index].handle, (EV_READ | EV_PERSIST), server_event_handler, (void *)server);
-				event_base_set(server->sysdata->evbase, &server->servers[index].event);
-				if (event_add(&server->servers[index].event, NULL) == -1) {
-					perror("event_add");
-				}
+				assert(server->servers[index].event == NULL);
+				assert(server->sysdata->evbase);
+				server->servers[index].event = event_new(
+					server->sysdata->evbase,
+					server->servers[index].handle,
+					EV_READ | EV_PERSIST,
+					server_event_handler,
+					(void *)server);
+
+				event_add(server->servers[index].event, NULL);
 
 				index++;
 			}
@@ -172,18 +176,15 @@ void server_cleanup(server_t *server)
 	assert(MAX_SERVERS > 0);
 	for (i=0; i<MAX_SERVERS; i++) {
 		assert(server->servers[i].handle == INVALID_HANDLE);
-		// event should be deleted as well, not sure how to check that.
+		assert(server->servers[i].event == NULL);
 	}
+
 
 	// cleanup and free all of the allocated nodes which should all be cleaned out and idle now;
 	assert(server->active == 0);
 	assert(server->maxconns > 0);
 	
 	ll_free(&server->nodelist);
-
-	// the queues should already have been cleared.
-	assert(ll_count(server->sysdata->queues) == 0);
-
 	server->sysdata = NULL;
 }
 
@@ -244,6 +245,7 @@ void server_event_handler(int hid, short flags, void *data)
 	int sfd;
 	node_t *node = NULL;
 	char tbuf[4];
+	struct timeval five_seconds = {5,0};
 	
 	assert(hid >= 0);
 	assert(data != NULL);
@@ -293,12 +295,16 @@ void server_event_handler(int hid, short flags, void *data)
 		if (server->sysdata->verbose > 1) printf(" -- node(%d) setting read event flags\n", sfd);
 		assert(server->sysdata->evbase != NULL);
 		assert(node->read_event == NULL);
-		node->read_event = event_new(server->sysdata->evbase, sfd, EV_READ | EV_PERSIST, node_read_handler, (void *)node);
-		event_add(node->read_event, 0);
+		node->read_event = event_new(
+			server->sysdata->evbase,
+			sfd,
+			EV_READ | EV_PERSIST,
+			node_read_handler,
+			(void *) node);
+		event_add(node->read_event, &five_seconds);
 
 		// add the node to the nodelist.
 		ll_push_head(&server->nodelist, node);
-		node->refcount ++;
 
 		server->active ++;
 		assert(server->active > 0);

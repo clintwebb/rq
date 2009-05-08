@@ -160,3 +160,35 @@ void sendConsume(node_t *node, char *queue, short int max, unsigned char priorit
 	expbuf_clear(node->build);
 }
 
+
+
+//-----------------------------------------------------------------------------
+// Send the ping command.
+void sendPing(node_t *node)
+{
+	assert(node != NULL);
+	assert(node->build);
+	assert(node->build->length == 0);
+
+	// add the commands to the out queue.
+	addCmd(node->build, RQ_CMD_PING);
+	
+	node_write_now(node, node->build->length, node->build->data);
+	expbuf_clear(node->build);
+}
+
+//-----------------------------------------------------------------------------
+// Send the pong command.
+void sendPong(node_t *node)
+{
+	assert(node != NULL);
+	assert(node->build);
+	assert(node->build->length == 0);
+
+	// add the commands to the out queue.
+	addCmd(node->build, RQ_CMD_PONG);
+	
+	node_write_now(node, node->build->length, node->build->data);
+	expbuf_clear(node->build);
+}
+

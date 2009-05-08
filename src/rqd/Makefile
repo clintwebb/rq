@@ -16,10 +16,10 @@ H_commands=commands.h
 H_process=process.h
 H_send=send.h $(H_node) $(H_message)
 H_actions=actions.h 
+H_signals=signals.h
 
 
-
-OBJS=rqd.o daemon.o settings.o stats.o data.o server.o node.o queue.o commands.o process.o message.o send.o actions.o
+OBJS=rqd.o daemon.o settings.o stats.o data.o server.o node.o queue.o commands.o process.o message.o send.o actions.o signals.o
 
 # DEBUG_LIBS=-lefence
 DEBUG_LIBS=
@@ -32,7 +32,7 @@ rqd: $(OBJS)
 actions.o: actions.c $(H_actions) $(H_server) $(H_stats) $(H_queue)
 	gcc -c -o $@ $(ARGS) actions.c 
 
-commands.o: commands.c $(H_commands) $(H_node) $(H_process)
+commands.o: commands.c $(H_commands) $(H_node) $(H_process)  $(H_send)
 	gcc -c -o $@ $(ARGS) commands.c
 
 data.o: data.c $(H_data)
@@ -44,7 +44,7 @@ daemon.o: daemon.c daemon.h
 message.o: message.c $(H_message) $(H_queue) $(H_actions)
 	gcc -c -o $@ $(ARGS) message.c
 
-node.o: node.c $(H_node) $(H_data) $(H_stats) $(H_queue) $(H_actions)
+node.o: node.c $(H_node) $(H_data) $(H_stats) $(H_queue) $(H_actions) $(H_server) $(H_send)
 	gcc -c -o $@ $(ARGS) node.c
 
 process.o: process.c $(H_process) $(H_send) $(H_queue) $(H_message) $(H_stats)
@@ -53,7 +53,7 @@ process.o: process.c $(H_process) $(H_send) $(H_queue) $(H_message) $(H_stats)
 queue.o: queue.c $(H_queue) $(H_server) $(H_send) $(H_actions)
 	gcc -c -o $@ $(ARGS) queue.c
 
-rqd.o: rqd.c daemon.h $(H_actions) $(H_commands) $(H_server) $(H_settings) $(H_stats) $(H_system_data)
+rqd.o: rqd.c daemon.h $(H_actions) $(H_commands) $(H_server) $(H_settings) $(H_stats) $(H_system_data) $(H_signals) $(H_queue)
 	gcc -c -o $@ $(ARGS) rqd.c
 
 send.o: send.c $(H_send) $(H_queue)
@@ -64,6 +64,9 @@ server.o: server.c $(H_server) $(H_commands) $(H_queue) $(H_settings)
 
 settings.o: settings.c $(H_settings)
 	gcc -c -o $@ $(ARGS) settings.c
+
+signals.o: signals.c $(H_signals) $(H_system_data) $(H_server) $(H_stats) $(H_queue)
+	gcc -c -o $@ $(ARGS) signals.c
 
 stats.o: stats.c $(H_stats) $(H_server) $(H_queue)
 	gcc -c -o $@ $(ARGS) stats.c

@@ -17,6 +17,7 @@
 #define FLAG_NODE_CLOSING 		2
 #define FLAG_NODE_CONTROLLER	4
 #define FLAG_NODE_NOQUEUES    8
+#define FLAG_NODE_BUSY        16
 
 typedef struct {
 	int handle;
@@ -26,16 +27,19 @@ typedef struct {
 	data_t data;
 	system_data_t *sysdata;
 	list_t in_msg, out_msg;
-	int refcount;
+	int idle;
+// 	int refcount;
 } node_t ;
 
 
 void node_init(node_t *node, system_data_t *sysdata);
 void node_free(node_t *node);
+void node_shutdown(node_t *node);
 
 void node_write_now(node_t *node, int length, char *data);
 void node_read_handler(int hid, short flags, void *data);
 void node_write_handler(int hid, short flags, void *data);
+
 
 #endif
 

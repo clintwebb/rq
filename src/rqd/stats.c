@@ -64,7 +64,7 @@ void stats_display(stats_t *stats, system_data_t *sysdata)
 		assert(sysdata->actpool);
 
 		if (sysdata->verbose)
-			printf("Bytes [%u/%u], Clients [%u], Requests [%u], Replies [%u], Broadcasts [%u], Queues[%u], ActPool[%u/%u], Msgs[%d/%d] MsgPool[%u/%u]\n",
+			printf("Bytes [%u/%u], Clients [%u], Requests [%u], Replies [%u], Broadcasts [%u], Queues[%u], Msgs[%d/%d] MsgPool[%u/%u]\n",
 				stats->in_bytes,
 				stats->out_bytes,
 				clients,
@@ -72,8 +72,6 @@ void stats_display(stats_t *stats, system_data_t *sysdata)
 				stats->replies,
 				stats->broadcasts,
 				queues,
-				action_pool_active(sysdata->actpool),
-				action_pool_inactive(sysdata->actpool),
 				msg_pending, msg_proc,
 				mempool_active_count(sysdata->msgpool), mempool_inactive_count(sysdata->msgpool));
 		

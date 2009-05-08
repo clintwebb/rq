@@ -4,6 +4,8 @@
 #include "data.h"
 #include "node.h"
 #include "queue.h"
+#include "send.h"
+#include "server.h"
 #include "stats.h"
 
 #include <assert.h>
@@ -46,11 +48,11 @@ void node_init(node_t *node, system_data_t *sysdata)
 	data_init(&node->data);
 	
 	node->flags = 0;
-	node->refcount = 0;
 	
 	assert(node->handle == INVALID_HANDLE);
 	node->read_event = NULL;
 	node->write_event = NULL;
+	node->idle = 0;
 }
 
 
@@ -67,7 +69,6 @@ void node_free(node_t *node)
 	sysdata = node->sysdata;
 	
 	assert(sysdata->bufpool != NULL);
-	assert(node->refcount == 0);
 	
 	node->flags = 0;
 	
@@ -128,7 +129,8 @@ void node_free(node_t *node)
 static void node_closed(node_t *node)
 {
 	message_t *msg;
-	action_t *action;
+	server_t *server;
+	system_data_t *sysdata;
 	
 	assert(node);
 	assert(node->sysdata);
@@ -136,8 +138,7 @@ static void node_closed(node_t *node)
 
 	// we've definately lost connection to the node, so we need to mark it by
 	// clearing the handle.
-	assert(node->handle != INVALID_HANDLE);
-	node->handle = INVALID_HANDLE;
+	assert(node->handle == INVALID_HANDLE);
 
 	// we need to remove the consume on the queues.
 	queue_cancel_node(node);
@@ -162,25 +163,36 @@ static void node_closed(node_t *node)
 		assert(0);
 	}
 
-	
-	// need to cancel the event.
-	if (BIT_TEST(node->flags, FLAG_NODE_ACTIVE)) {
+
+	if (node->write_event) {
+		event_del(node->write_event);
+		event_free(node->write_event);
+		node->write_event = NULL;
+	}
+
+	if (node->read_event) {
 		event_del(node->read_event);
 		event_free(node->read_event);
 		node->read_event = NULL;
-		BIT_CLEAR(node->flags, FLAG_NODE_ACTIVE);
 	}
 
 
-	// setup an action to free the node.
-	action = action_pool_new(node->sysdata->actpool);
-	action_set(action, 0, ah_node_shutdown, node);
-	node->refcount ++;
-	action = NULL;
+	// need to indicate that node is not active.
+	BIT_CLEAR(node->flags, FLAG_NODE_ACTIVE);
+
+	
+	// remove the node from the server object.
+	sysdata = node->sysdata;
+	server = sysdata->server;
+	assert(server);
+	assert(ll_count(&server->nodelist) > 0);
+	ll_remove(&server->nodelist, node, NULL);
+	server->active --;
+
+	// free the resources used by the node.
+	node_free(node);
+	free(node);
 }
-
-
-
 
 
 
@@ -270,7 +282,6 @@ void node_read_handler(int hid, short flags, void *data)
 	assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE));
 	assert(node->sysdata);
 	assert(node->handle == hid);
-	assert(flags & EV_READ);
 	assert(node->sysdata->stats);
 	assert(node->sysdata->bufpool);
 	assert(node->in);
@@ -278,74 +289,100 @@ void node_read_handler(int hid, short flags, void *data)
 
 	stats = node->sysdata->stats;
 
-	empty = 0;
-	while (empty == 0) {
-		assert(node->in->length == 0 && node->in->max > 0 && node->in->data != NULL);
-		assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE));
-		assert(node->handle >= 0);
-		
-		res = read(node->handle, node->in->data, node->in->max);
-		if (res > 0) {
-			assert(res <= node->in->max);
-			stats->in_bytes += res;
-			node->in->length = res;
+	if (flags & EV_TIMEOUT) {
+		// idle
+		assert(node->idle >= 0);
+		node->idle ++;
+		if (node->idle == 3) {
+			sendPing(node);
+		}
+		else if (node->idle == 6) {
+			BIT_SET(node->flags, FLAG_NODE_BUSY);
+		} 
+	}
+	else {
+		assert(flags & EV_READ);
 
-			// if we pulled out the max we had avail in our buffer, that means we can pull out more at a time, so increase our incoming buffer.
-			if (res == node->in->max) {
-				expbuf_shrink(node->in, node->in->max + DEFAULT_BUFFSIZE);
-				assert(empty == 0);
-			}
-			else { empty = 1; }
-
-			assert(node->waiting);
-			if (node->waiting->length > 0) {
-				// we have data left in the in-buffer, so we add the content of the node->in buffer
-				assert(node->in->length > 0);
-				expbuf_add(node->waiting, node->in->data, node->in->length);
-				expbuf_clear(node->in);
-				assert(node->in->length == 0);
-				assert(node->waiting->length > 0 && node->waiting->data != NULL);
-
-				assert(node->sysdata->risp != NULL);
-				res = risp_process(node->sysdata->risp, node, node->waiting->length, (unsigned char *) node->waiting->data);
-				assert(res <= node->waiting->length);
-				assert(res >= 0);
-				if (res > 0) { expbuf_purge(node->waiting, res); }
-			}
-			else {
-				// there is no data in the waiting-buffer, we will process the node->in buffer by itself.
-				assert(node->sysdata->risp != NULL);
-				res = risp_process(node->sysdata->risp, node, node->in->length, (unsigned char *) node->in->data);
-				assert(res <= node->in->length);
-				assert(res >= 0);
-				if (res > 0) { expbuf_purge(node->in, res); }
-
-				// if there is data left over, then we need to add it to our in-buffer.
-				if (node->in->length > 0) {
-					assert(node->waiting);
+		// if we have data, then obviously we are not idle...
+		assert(node->idle >= 0);
+		node->idle = 0;
+	
+		empty = 0;
+		while (empty == 0) {
+			assert(node->in->length == 0 && node->in->max > 0 && node->in->data != NULL);
+			assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE));
+			assert(node->handle >= 0);
+			
+			res = read(node->handle, node->in->data, node->in->max);
+			if (res > 0) {
+				assert(res <= node->in->max);
+				stats->in_bytes += res;
+				node->in->length = res;
+	
+				// if we pulled out the max we had avail in our buffer, that means we
+				// can pull out more at a time, so increase our incoming buffer.
+				if (res == node->in->max) {
+					expbuf_shrink(node->in, node->in->max + DEFAULT_BUFFSIZE);
+					assert(empty == 0);
+				}
+				else { empty = 1; }
+	
+				assert(node->waiting);
+				if (node->waiting->length > 0) {
+					// we have data left in the in-buffer, so we add the content of the node->in buffer
+					assert(node->in->length > 0);
 					expbuf_add(node->waiting, node->in->data, node->in->length);
 					expbuf_clear(node->in);
+					assert(node->in->length == 0);
+					assert(node->waiting->length > 0 && node->waiting->data != NULL);
+	
+					assert(node->sysdata->risp != NULL);
+					res = risp_process(node->sysdata->risp, node, node->waiting->length, (unsigned char *) node->waiting->data);
+					assert(res <= node->waiting->length);
+					assert(res >= 0);
+					if (res > 0) { expbuf_purge(node->waiting, res); }
+				}
+				else {
+					// there is no data in the waiting-buffer, we will process the node->in buffer by itself.
+					assert(node->sysdata->risp != NULL);
+					res = risp_process(node->sysdata->risp, node, node->in->length, (unsigned char *) node->in->data);
+					assert(res <= node->in->length);
+					assert(res >= 0);
+					if (res > 0) { expbuf_purge(node->in, res); }
+	
+					// if there is data left over, then we need to add it to our in-buffer.
+					if (node->in->length > 0) {
+						assert(node->waiting);
+						expbuf_add(node->waiting, node->in->data, node->in->length);
+						expbuf_clear(node->in);
+					}
 				}
 			}
-		}
-		else {
-			assert(empty == 0);
-			empty = 1;
-			
-			if (res == 0) {
-				if (node->sysdata->verbose > 1)
-					printf("Node[%d] closed while reading.\n", node->handle);
-				node_closed(node);
-				assert(empty != 0);
-			}
 			else {
-				assert(res == -1);
-				if (errno != EAGAIN && errno != EWOULDBLOCK) {
+
+				// either the socket has closed, or it would have blocked, even
+				// though we got an event to say it is ready.
+			
+				assert(empty == 0);
+				empty = 1;
+				
+				if (res == 0) {
 					if (node->sysdata->verbose > 1)
-						printf("Node[%d] closed while reading- because of error: %d\n", node->handle, errno);
-					close(node->handle);
+						printf("Node[%d] closed while reading.\n", node->handle);
+					node->handle = INVALID_HANDLE;
 					node_closed(node);
 					assert(empty != 0);
+				}
+				else {
+					assert(res == -1);
+					if (errno != EAGAIN && errno != EWOULDBLOCK) {
+						if (node->sysdata->verbose > 1)
+							printf("Node[%d] closed while reading- because of error: %d\n", node->handle, errno);
+						close(node->handle);
+						node->handle = INVALID_HANDLE;
+						node_closed(node);
+						assert(empty != 0);
+					}
 				}
 			}
 		}
@@ -401,6 +438,7 @@ void node_write_handler(int hid, short flags, void *data)
 	}
 	else if (res == 0) {
 		if (node->sysdata->verbose > 1) printf("Node[%d] closed while writing.\n", node->handle);
+		node->handle = INVALID_HANDLE;
 		node_closed(node);
 		assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE) == 0);
 	}
@@ -409,8 +447,53 @@ void node_write_handler(int hid, short flags, void *data)
 		if (errno != EAGAIN && errno != EWOULDBLOCK) {
 			if (node->sysdata->verbose > 1) printf("Node[%d] closed while writing - because of error: %d\n", node->handle, errno);
 			close(node->handle);
+			node->handle = INVALID_HANDLE;
 			node_closed(node);
 			assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE) == 0);
 		}
 	}
 }
+
+
+//-----------------------------------------------------------------------------
+// shutdown the node.  If the node still has pending requests, then we need to
+// wait until the requests have been returned or have timed out.
+void node_shutdown(node_t *node)
+{
+	system_data_t *sysdata;
+
+	assert(node);
+	assert(node->sysdata);
+	
+	sysdata = node->sysdata;
+
+	// if the node is still connected, then we will attempt to first tell it that
+	// we are closing the node.  If the node closed the connection first, then we
+	// wont have a chance to do this.
+	if (node->handle != INVALID_HANDLE && BIT_TEST(node->flags, FLAG_NODE_CLOSING) == 0) {
+		sendClosing(node);
+		BIT_SET(node->flags, FLAG_NODE_CLOSING);
+	}
+
+	// We are still connected to the node, so we need to put a timeout on the
+	// messages the node is servicing.
+	if (node->handle != INVALID_HANDLE && (ll_count(&node->in_msg) > 0 || ll_count(&node->out_msg) > 0)) {
+		// need to set a timeout on the messages.
+		assert(0);
+	}
+	else {
+
+		// if we have done all we need to do, but still have a valid handle, then we should close it, and delete the event.
+		if (node->handle != INVALID_HANDLE && node->out->length == 0) {
+			assert(node->out->length == 0);
+			assert(ll_count(&node->in_msg) == 0);
+			assert(ll_count(&node->out_msg) == 0);
+			assert(node->handle > 0);
+			close(node->handle);
+			node->handle = INVALID_HANDLE;
+			node_closed(node);
+		}
+	}
+}
+
+

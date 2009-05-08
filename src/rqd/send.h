@@ -16,4 +16,7 @@ void sendUndelivered(node_t *node, message_t *msg);
 void sendClosing(node_t *node);
 void sendConsume(node_t *node, char *queue, short int max, unsigned char priority);
 
+void sendPing(node_t *node);
+void sendPong(node_t *node);
+
 #endif

@@ -9,8 +9,10 @@
 #include "actions.h"
 #include "commands.h"
 #include "daemon.h"
+#include "queue.h"
 #include "server.h"
 #include "settings.h"
+#include "signals.h"
 #include "stats.h"
 #include "system_data.h"
 
@@ -32,10 +34,6 @@
 #define PACKAGE						"rqd"
 #define VERSION						"1.0"
 
-
-//-----------------------------------------------------------------------------
-// Global variables.
-struct event_base *main_event_base = NULL;
 
 
 
@@ -63,17 +61,6 @@ void usage(void) {
 
 
 
-//-----------------------------------------------------------------------------
-// Handle the signal.  Any signal we receive can only mean that we need to
-// exit.  We could initiate the shutdown action from here, but we really want
-// to make sure this function exits as quickly as possible, because we dont
-// want another signal to arrive while we are still processing one.  Therefore,
-// we merely break out of the loop and we use that to initiate things.
-static void sig_handler(const int sig) {
-	printf("SIGINT handled.\n");
-	assert(main_event_base != NULL);
-	event_base_loopbreak(main_event_base);
-}
 
 
 
@@ -82,7 +69,22 @@ void get_options(settings_t *settings, int argc, char **argv)
 	int c;
 	
 	// process arguments 
-	while ((c = getopt(argc, argv, "p:k:c:hvd:u:P:l:s:a:A:b:B:L:")) != -1) {
+	while ((c = getopt(argc, argv,
+		"hv"	/* help, version */
+		
+		"c:"  /* max number of connections */
+		"d:"  /* run as daemon */
+		"u:"  /* user to run as */
+		"P:"  /* pid file */
+		"l:"  /* interfaces to bind to */
+
+		"p:"  /* port to listen on. */
+		"a:"
+		"A:"
+		"b:"
+		"B:"
+		"L:"  /*  logfile */
+	)) != -1) {
 		switch (c) {
 			case 'p':
 				settings->port = atoi(optarg);
@@ -175,6 +177,7 @@ int main(int argc, char **argv)
 	server_t       *server   = NULL;
 	stats_t        *stats    = NULL;
 	action_t       *action   = NULL;
+	queue_t        *q;
 
 	system_data_t   sysdata;
 	int i;
@@ -194,11 +197,10 @@ int main(int argc, char **argv)
 	sysdata.risp      = NULL;
 	sysdata.queues    = NULL;
 	sysdata.msgpool   = NULL;
+	sysdata.sighup_event = NULL;
+	sysdata.sigint_event = NULL;
 
 
-	// handle SIGINT 
-	signal(SIGINT, sig_handler);
-	
 	// init settings
 	settings = (settings_t *) malloc(sizeof(settings_t));
 	assert(settings != NULL);
@@ -229,8 +231,16 @@ int main(int argc, char **argv)
 
 	// initialize main thread libevent instance
 	if (settings->verbose) printf("Initialising the event system.\n");
-	main_event_base = event_init();
-	sysdata.evbase = main_event_base;
+	sysdata.evbase = event_init();
+
+
+	// handle SIGINT
+	assert(sysdata.evbase);
+	sysdata.sighup_event = evsignal_new(sysdata.evbase, SIGHUP, sighup_handler, &sysdata);
+	sysdata.sigint_event = evsignal_new(sysdata.evbase, SIGINT, sigint_handler, &sysdata);
+	event_add(sysdata.sighup_event, NULL);
+	event_add(sysdata.sigint_event, NULL);
+
 
 	// Creating our buffer pool.
 	if (settings->verbose) printf("Creating the Buffer pool.\n");
@@ -301,6 +311,8 @@ int main(int argc, char **argv)
 	risp_add_invalid(sysdata.risp, &cmdInvalid);
 	risp_add_command(sysdata.risp, RQ_CMD_CLEAR, 	      &cmdClear);
 	risp_add_command(sysdata.risp, RQ_CMD_EXECUTE,      &cmdExecute);
+	risp_add_command(sysdata.risp, RQ_CMD_PING,         &cmdPing);
+	risp_add_command(sysdata.risp, RQ_CMD_PONG,         &cmdPong);
 	risp_add_command(sysdata.risp, RQ_CMD_REQUEST,      &cmdRequest);
 	risp_add_command(sysdata.risp, RQ_CMD_REPLY,        &cmdReply);
 	risp_add_command(sysdata.risp, RQ_CMD_RECEIVED,     &cmdReceived);
@@ -343,18 +355,8 @@ int main(int argc, char **argv)
 
 	// enter the event loop.
 	if (settings->verbose) printf("Starting Event Loop\n\n");
-	event_base_loop(main_event_base, 0);
-    
-	// The event loop was exited, this means that we received an interrupt
-	// signal.  We need to create an appropriate action object.
-	assert(sysdata.actpool != NULL);
-	action = action_pool_new(sysdata.actpool);
-	action_set(action, 0, ah_server_shutdown, NULL);
-	action = NULL;
-	if (settings->verbose) printf("Initiated Shutdown procedure.\n");
-
-	// In order to complete the shutdown, we need to continue the event loop.
-	event_base_loop(main_event_base, 0);
+	assert(sysdata.evbase);
+	event_base_loop(sysdata.evbase, 0);
 	if (settings->verbose) printf("Shutdown preparations complete.  Shutting down now.\n");
 
 
@@ -378,6 +380,9 @@ int main(int argc, char **argv)
 
 	// The queue list should already be cleared as part of the server shutdown event.
 	assert(sysdata.queues);
+	while ((q = ll_pop_head(sysdata.queues))) {
+		queue_free(q);
+	}
 	ll_free(sysdata.queues);
 	free(sysdata.queues);
 	sysdata.queues = NULL;

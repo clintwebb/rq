@@ -56,9 +56,6 @@ void message_set_orignode(message_t *msg, void *node)
 	assert(node != NULL);
 	assert(msg->source_node == NULL);
 	msg->source_node = node;
-
-	((node_t *)node)->refcount ++;
-	assert(((node_t *)node)->refcount > 0);
 }
 
 
@@ -106,7 +103,6 @@ void message_set_queue(message_t *msg, void *queue)
 // If the message has a timeout, we need to know.
 void message_set_timeout(message_t *msg, int seconds)
 {
-	action_t *action;
 	assert(msg);
 	assert(seconds >= 0);
 
@@ -116,11 +112,8 @@ void message_set_timeout(message_t *msg, int seconds)
 	msg->timeout = seconds;
 	BIT_SET(msg->flags, FLAG_MSG_TIMEOUT);
 
-	// create an action to monitor and update the countdown.
-	assert(msg->sysdata->actpool);
-	action = action_pool_new(msg->sysdata->actpool);
-	action_set(action, 0, ah_message, msg);
-	action = NULL;
+	// set some better values, because the timeout is not very accurate.  Need to look at hte current time, and specify an expiry.  Keep in mind that the socket will only break on Timeout every 5 seconds, so any timeout smaller than that might not get actioned unless there are other messages arriving on that queue that pushes it through.
+	assert(0);
 }
 
 

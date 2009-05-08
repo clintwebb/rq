@@ -208,9 +208,6 @@ void queue_cancel_node(node_t *node)
 
 				ll_remove(&queue->nodes_busy, nq, next_node);
 
-				nq->node->refcount --;
-				assert(nq->node->refcount >= 0);
-
 				free(nq);
 				nq = NULL;
 				found++;
@@ -232,9 +229,6 @@ void queue_cancel_node(node_t *node)
 
 				ll_remove(&queue->nodes_ready, nq, next_node);
 				
-				nq->node->refcount --;
-				assert(nq->node->refcount >= 0);
-
 				free(nq);
 				nq = NULL;
 				found++;
@@ -290,10 +284,7 @@ void queue_cancel_node(node_t *node)
 						printf("queue %d:'%s' removing node:%d from waitinglist\n", queue->qid, queue->name, node->handle);
 	
 					ll_remove(&queue->nodes_waiting, nq, next_node);
-					
-					assert(nq->node->refcount > 0);
-					nq->node->refcount --;
-	
+						
 					free(nq);
 					nq = NULL;
 					found++;
@@ -313,10 +304,7 @@ void queue_cancel_node(node_t *node)
 			else {
 				// this queue has no nodes at all, not even any waiting to start up exclusively.
 				if (ll_count(&queue->msg_pending) <= 0 && ll_count(&queue->msg_proc) <= 0) {
-					action_t *action;
-					assert(node->sysdata->actpool);
-					action = action_pool_new(node->sysdata->actpool);
-					action_set(action, 0, ah_queue_shutdown, queue);
+					queue_shutdown(queue);
 				}
 				else {
 					// but it does have messages waiting to be deliverd... so we wont delete the queue just yet.
@@ -583,4 +571,46 @@ void queue_msg_done(queue_t *queue, node_t *node)
 	}
 }
 
+
+
+//-----------------------------------------------------------------------------
+// shutdown the queue.  If there are messages in a queue waiting to be
+// delivered or processed, we will need to wait for them.  Once all nodes have
+// been stopped, then we can exit.
+void queue_shutdown(queue_t *queue)
+{
+	system_data_t *sysdata;
+	
+	assert(queue);
+	assert(queue->sysdata);
+	sysdata = queue->sysdata;
+	
+	// if there is pending messages to deliver, then reply to the source, indicating unable to deliver.
+	if (ll_count(&queue->msg_pending) > 0) {
+		// We have a message that needs to be returned.
+
+		assert(0);
+	}
+	
+	// if we have messages being processed, might need to reply to source.
+	if (ll_count(&queue->msg_proc) > 0) {
+		// We have a message that needs to be returned.
+
+		assert(0);
+	}
+
+
+	// delete the list of nodes that are consuming this queue.
+	if (ll_count(&queue->nodes_busy) > 0) {
+		assert(0);
+	}
+
+	if (ll_count(&queue->nodes_ready) > 0) {
+		assert(0);
+	}
+
+	if (ll_count(&queue->nodes_waiting) > 0) {
+		assert(0);
+	}
+}
 
