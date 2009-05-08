@@ -4,6 +4,7 @@
 #include "commands.h"
 #include "node.h"
 #include "process.h"
+#include "send.h"
 
 #include <assert.h>
 #include <risp.h>
@@ -63,6 +64,43 @@ void cmdClear(void *base)
 	assert(node->sysdata->verbose >= 0);
 	if (node->sysdata->verbose > 1) printf("node:%d CLEAR\n", node->handle);
 }
+
+//-----------------------------------------------------------------------------
+// PING and PONG are handled differently to all other flags.  It will be
+// actioned straight away, and does not require an EXECUTE.
+void cmdPing(void *base)
+{
+ 	node_t *node = (node_t *) base;
+
+ 	assert(node != NULL);
+ 	assert(node->handle >= 0);
+ 	
+	sendPong(node);
+}
+
+
+//-----------------------------------------------------------------------------
+// When a PONG is received, it is assumed that we sent a ping.  It can also be
+// used as a keep-alive.
+void cmdPong(void *base)
+{
+ 	node_t *node = (node_t *) base;
+
+ 	assert(node != NULL);
+ 	assert(node->handle >= 0);
+
+ 	assert(node->idle >= 0);
+ 	node->idle = 0;
+
+ 	if (BIT_TEST(node->flags, FLAG_NODE_BUSY)) {
+		BIT_CLEAR(node->flags, FLAG_NODE_BUSY);
+
+		// since the node is no longer marked as busy, then we need to alert the
+		// queues so that they can begin sending messages to this node again.
+		assert(0);
+	}
+}
+
 
 
 

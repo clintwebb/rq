@@ -68,6 +68,8 @@
 #define RQ_CMD_NOP              0
 #define RQ_CMD_CLEAR            1
 #define RQ_CMD_EXECUTE          2
+#define RQ_CMD_PING             5
+#define RQ_CMD_PONG             6
 
 #define RQ_CMD_REQUEST          10
 #define RQ_CMD_REPLY            11

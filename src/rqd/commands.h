@@ -18,6 +18,9 @@ void cmdReceived(void *base);
 void cmdDelivered(void *base);
 void cmdExclusive(void *base);
 
+void cmdPing(void *base);
+void cmdPong(void *base);
+
 void cmdId(void *base, risp_int_t value);
 void cmdTimeout(void *base, risp_int_t value);
 void cmdMax(void *base, risp_int_t value);

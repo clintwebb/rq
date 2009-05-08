@@ -1053,6 +1053,32 @@ static void cmdClear(void *ptr)
 	expbuf_clear(&conn->data.payload);
 }
 
+
+static void cmdPing(void *ptr)
+{
+	rq_conn_t *conn = (rq_conn_t *) ptr;
+	assert(conn);
+
+	assert(conn->build.length == 0);
+	addCmd(&conn->build, RQ_CMD_PONG);
+	rq_senddata(conn, conn->build.data, conn->build.length);
+	expbuf_clear(&conn->build);
+}
+
+
+static void cmdPong(void *ptr)
+{
+	rq_conn_t *conn = (rq_conn_t *) ptr;
+	assert(conn);
+
+	// not sure what to do with this yet.  Havent built in the code to actually handle things if we dont get the pong back.
+	assert(0);
+}
+
+
+
+
+
 static void cmdExecute(void *ptr)
 {
 	rq_conn_t *conn = (rq_conn_t *) ptr;
@@ -1380,6 +1406,8 @@ void rq_init(rq_t *rq)
 	risp_add_invalid(rq->risp, &cmdInvalid);
 	risp_add_command(rq->risp, RQ_CMD_CLEAR,        &cmdClear);
 	risp_add_command(rq->risp, RQ_CMD_EXECUTE,      &cmdExecute);
+	risp_add_command(rq->risp, RQ_CMD_PING,         &cmdPing);
+	risp_add_command(rq->risp, RQ_CMD_PONG,         &cmdPong);
 	risp_add_command(rq->risp, RQ_CMD_REQUEST,      &cmdRequest);
 	risp_add_command(rq->risp, RQ_CMD_RECEIVED,     &cmdReceived);
 	risp_add_command(rq->risp, RQ_CMD_DELIVERED,    &cmdDelivered);
