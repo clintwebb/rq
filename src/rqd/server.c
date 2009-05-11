@@ -34,7 +34,6 @@ void server_init(server_t *server, system_data_t *sysdata)
 	}
 
 	server->active = 0;
-	ll_init(&server->nodelist);
 }
 
 
@@ -184,7 +183,6 @@ void server_cleanup(server_t *server)
 	assert(server->active == 0);
 	assert(server->maxconns > 0);
 	
-	ll_free(&server->nodelist);
 	server->sysdata = NULL;
 }
 
@@ -304,7 +302,7 @@ void server_event_handler(int hid, short flags, void *data)
 		event_add(node->read_event, &five_seconds);
 
 		// add the node to the nodelist.
-		ll_push_head(&server->nodelist, node);
+		ll_push_head(server->sysdata->nodelist, node);
 
 		server->active ++;
 		assert(server->active > 0);

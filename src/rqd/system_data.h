@@ -23,6 +23,7 @@ typedef struct {
 	void *server;
 	void *stats;
 	list_t *queues;
+	list_t *nodelist;
 } system_data_t;
 
 

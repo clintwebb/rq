@@ -199,6 +199,7 @@ int main(int argc, char **argv)
 	sysdata.msgpool   = NULL;
 	sysdata.sighup_event = NULL;
 	sysdata.sigint_event = NULL;
+	sysdata.nodelist = NULL;
 
 
 	// init settings
@@ -329,6 +330,10 @@ int main(int argc, char **argv)
 	risp_add_command(sysdata.risp, RQ_CMD_QUEUE,        &cmdQueue);
 	risp_add_command(sysdata.risp, RQ_CMD_PAYLOAD,      &cmdPayload);
 
+	// create the nodelist list.
+	sysdata.nodelist = (list_t *) malloc(sizeof(list_t));
+	assert(sysdata.nodelist);
+	ll_init(sysdata.nodelist);
 
 	// connect to other controller.
 	if (settings->primary != NULL) {
@@ -372,13 +377,13 @@ int main(int argc, char **argv)
 	free(sysdata.msgpool);
 	sysdata.msgpool = NULL;
 
-	// cleanup 'server', which should cleanup all the 'nodes'
+	// cleanup 'server'
 	server_cleanup(server);
 	free(server);
 	server = NULL;
 	sysdata.server = NULL;
 
-	// The queue list should already be cleared as part of the server shutdown event.
+	// The queue list would not be empty, but the queues themselves should already be cleared as part of the server shutdown event.
 	assert(sysdata.queues);
 	while ((q = ll_pop_head(sysdata.queues))) {
 		queue_free(q);
@@ -386,6 +391,13 @@ int main(int argc, char **argv)
 	ll_free(sysdata.queues);
 	free(sysdata.queues);
 	sysdata.queues = NULL;
+
+	// nodelist should already be empty, otherwise how did we break out of the loop?
+	assert(sysdata.nodelist);
+	assert(ll_count(sysdata.nodelist) == 0);
+	ll_free(sysdata.nodelist);
+	free(sysdata.nodelist);
+	sysdata.nodelist = NULL;
 	
 	// cleanup risp library.
 	risp_shutdown(sysdata.risp);

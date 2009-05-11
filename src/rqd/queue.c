@@ -156,11 +156,13 @@ void queue_notify(queue_t *queue, void *pserver)
 	
 	assert(queue->qid > 0);
 	assert(queue->name != NULL);
+	assert(server->sysdata);
+	assert(server->sysdata->nodelist);
 
 	// now that we have our server object, we can go thru the list of nodes.  If
 	// any of them are controllers, then we need to send a consume request.
-	next = ll_start(&server->nodelist);
-	node = ll_next(&server->nodelist, &next);
+	next = ll_start(server->sysdata->nodelist);
+	node = ll_next(server->sysdata->nodelist, &next);
 	while (node) {
 		
 		if (BIT_TEST(node->flags, FLAG_NODE_CONTROLLER)) {
@@ -169,7 +171,7 @@ void queue_notify(queue_t *queue, void *pserver)
 			sendConsume(node, queue->name, 1, QUEUE_LOW_PRIORITY);
 		}
 		
-		node = ll_next(&server->nodelist, &next);
+		node = ll_next(server->sysdata->nodelist, &next);
 	}
 }
 

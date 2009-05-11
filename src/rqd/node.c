@@ -185,8 +185,8 @@ static void node_closed(node_t *node)
 	sysdata = node->sysdata;
 	server = sysdata->server;
 	assert(server);
-	assert(ll_count(&server->nodelist) > 0);
-	ll_remove(&server->nodelist, node, NULL);
+	assert(ll_count(sysdata->nodelist) > 0);
+	ll_remove(sysdata->nodelist, node, NULL);
 	server->active --;
 
 	// free the resources used by the node.
