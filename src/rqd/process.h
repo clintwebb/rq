@@ -10,7 +10,6 @@ void processCancelQueue(node_t *node);
 void processClosing(node_t *node);
 void processServerFull(node_t *node);
 void processQueueLink(node_t *node);
-void processController(node_t *node);
 void processBroadcast(node_t *node);
 void processDelivered(node_t *node);
 void processReceived(node_t *node);

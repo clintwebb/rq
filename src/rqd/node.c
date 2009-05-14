@@ -51,6 +51,7 @@ void node_init(node_t *node, system_data_t *sysdata)
 	node->read_event = NULL;
 	node->write_event = NULL;
 	node->idle = 0;
+	node->controller = NULL;
 }
 
 
@@ -67,6 +68,8 @@ void node_free(node_t *node)
 	sysdata = node->sysdata;
 	
 	assert(sysdata->bufpool != NULL);
+
+	assert(node->controller == NULL);
 	
 	node->flags = 0;
 	
@@ -80,7 +83,6 @@ void node_free(node_t *node)
 
 	assert(node->write_event == NULL);
 	
-
 	assert(node->out);
 	expbuf_clear(node->out);
 	expbuf_pool_return(sysdata->bufpool, node->out);
@@ -163,10 +165,8 @@ static void node_closed(node_t *node)
 		node->read_event = NULL;
 	}
 
-
 	// need to indicate that node is not active.
 	BIT_CLEAR(node->flags, FLAG_NODE_ACTIVE);
-
 	
 	// remove the node from the server object.
 	sysdata = node->sysdata;
@@ -272,11 +272,14 @@ void node_read_handler(int hid, short flags, void *data)
 	assert(node->handle == hid);
 	assert(node->sysdata->stats);
 	assert(node->sysdata->bufpool);
-	assert(node->sysdata->in_buf);
 	assert(node->read_event);
 
-	stats = node->sysdata->stats;
+	assert(node->sysdata->in_buf);
 	in = node->sysdata->in_buf;
+	
+	stats = node->sysdata->stats;
+	assert(stats);
+	stats->re ++;
 
 	if (flags & EV_TIMEOUT) {
 		// idle
@@ -401,6 +404,7 @@ void node_write_handler(int hid, short flags, void *data)
 
 	stats = node->sysdata->stats;
 	assert(stats);
+	stats->we ++;
 
 	// we've requested the event, so we should have data to process.
 	assert(node->out);
@@ -483,6 +487,50 @@ void node_shutdown(node_t *node)
 			node_closed(node);
 		}
 	}
+}
+
+
+//-----------------------------------------------------------------------------
+// we have an array of node connections.  This function will be used to create
+// a new node connection and put it in the array.  This only has to be done
+// once for each slot.  Once it is created, it is re-used.
+node_t * node_create(system_data_t *sysdata, int handle)
+{
+	node_t *node;
+	struct timeval five_seconds = {5,0};
+	
+	assert(handle > 0);
+	assert(sysdata);
+	assert(sysdata->evbase);
+
+	node = (node_t *) malloc(sizeof(node_t));
+	assert(node);
+	if (node) {
+
+		assert(sysdata->bufpool != NULL);
+		node_init(node, sysdata);
+		node->handle = handle;
+				
+		assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE) == 0);
+		BIT_SET(node->flags, FLAG_NODE_ACTIVE);
+
+		// should we add the node to the node list?
+		// setup the event handling...
+		assert(sysdata->evbase != NULL);
+		assert(node->read_event == NULL);
+		node->read_event = event_new(
+			sysdata->evbase,
+			handle,
+			EV_READ | EV_PERSIST,
+			node_read_handler,
+			(void *) node);
+		event_add(node->read_event, &five_seconds);
+
+		// add the node to the nodelist.
+		ll_push_head(sysdata->nodelist, node);
+	}
+	
+	return(node);
 }
 
 

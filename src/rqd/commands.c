@@ -206,6 +206,29 @@ void cmdExclusive(void *base)
 }
 
 
+void cmdClosing(void *base)
+{
+	node_t *node = (node_t *) base;
+ 	assert(node != NULL);
+	assert(node->sysdata != NULL);
+	assert(node->sysdata->verbose >= 0);
+
+ 	// ensure only the flags that are valid.
+ 	BIT_CLEAR(node->data.flags, DATA_FLAG_CONSUME);
+ 	BIT_CLEAR(node->data.flags, DATA_FLAG_REQUEST);
+ 	BIT_CLEAR(node->data.flags, DATA_FLAG_REPLY);
+ 	
+ 	// set our specific flag.
+	BIT_SET(node->data.flags, DATA_FLAG_CLOSING);
+	
+	assert(node->sysdata != NULL);
+	assert(node->sysdata->verbose >= 0);
+	if (node->sysdata->verbose > 1)
+		printf("node:%d CLOSING (flags:%x, mask:%x)\n", node->handle, node->data.flags, node->data.mask);
+}
+
+
+
 void cmdConsume(void *base)
 {
 	node_t *node = (node_t *) base;
@@ -422,9 +445,6 @@ void cmdExecute(void *base)
 	}
 	else if (BIT_TEST(node->data.flags, DATA_FLAG_SERVER_FULL)) {
 		processServerFull(node);
-	}
-	else if (BIT_TEST(node->data.flags, DATA_FLAG_CONTROLLER)) {
-		processController(node);
 	}
 	else if (BIT_TEST(node->data.mask, DATA_MASK_QUEUEID) && BIT_TEST(node->data.mask, DATA_MASK_QUEUE)) {
 		processQueueLink(node);

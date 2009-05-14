@@ -186,40 +186,6 @@ void server_cleanup(server_t *server)
 	server->sysdata = NULL;
 }
 
-//-----------------------------------------------------------------------------
-// we have an array of node connections.  This function will be used to create
-// a new node connection and put it in the array.  This only has to be done
-// once for each slot.  Once it is created, it is re-used.
-static node_t * create_node(server_t *server, int handle)
-{
-	node_t *node;
-	
-	assert(handle > 0);
-	assert(server != NULL);
-	assert(server->sysdata != NULL);
-	assert(server->sysdata->evbase != NULL);
-	assert(server->maxconns > 0);
-	assert(server->active < server->maxconns);
-	assert(server->active >= 0);
-
-	if (server->sysdata->verbose > 1) printf("create_node(): active=%d, maxconns=%d\n", server->active, server->maxconns);
-	
-	assert(server->active < server->maxconns);
-	
-	node = (node_t *) malloc(sizeof(node_t));
-	assert(node != NULL);
-	if (node != NULL) {
-
-		assert(server->sysdata->bufpool != NULL);
-		node_init(node, server->sysdata);
-		node->handle = handle;
-				
-		assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE) == 0);
-		BIT_SET(node->flags, FLAG_NODE_ACTIVE);
-	}
-	
-	return(node);
-}
 
 
 //-----------------------------------------------------------------------------
@@ -243,7 +209,6 @@ void server_event_handler(int hid, short flags, void *data)
 	int sfd;
 	node_t *node = NULL;
 	char tbuf[4];
-	struct timeval five_seconds = {5,0};
 	
 	assert(hid >= 0);
 	assert(data != NULL);
@@ -268,12 +233,8 @@ void server_event_handler(int hid, short flags, void *data)
 		return;
 	}
 
-
-	if (server->sysdata->verbose) printf("New Connection [%d]\n", sfd);
-	node = create_node(server, sfd);
-	if (node == NULL) {
+	if (server->active >= server->maxconns) {
 		assert(server->maxconns > 0);
-		assert(server->active == server->maxconns);
 		if (server->sysdata->verbose) printf("Server is full.\n");
 
 		// we've reached our limit.
@@ -285,24 +246,13 @@ void server_event_handler(int hid, short flags, void *data)
 		close(sfd);
 	}
 	else {
+		if (server->sysdata->verbose) printf("New Connection [%d]\n", sfd);
+		node = node_create(server->sysdata, sfd);
+		assert(node);
+			
 		// mark socket as non-blocking
 		if (server->sysdata->verbose > 1) printf(" -- node(%d) setting non-blocking mode\n", sfd);
 		evutil_make_socket_nonblocking(sfd);
-		
-		// setup the event handling...
-		if (server->sysdata->verbose > 1) printf(" -- node(%d) setting read event flags\n", sfd);
-		assert(server->sysdata->evbase != NULL);
-		assert(node->read_event == NULL);
-		node->read_event = event_new(
-			server->sysdata->evbase,
-			sfd,
-			EV_READ | EV_PERSIST,
-			node_read_handler,
-			(void *) node);
-		event_add(node->read_event, &five_seconds);
-
-		// add the node to the nodelist.
-		ll_push_head(server->sysdata->nodelist, node);
 
 		server->active ++;
 		assert(server->active > 0);

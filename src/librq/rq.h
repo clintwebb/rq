@@ -82,7 +82,6 @@
 #define RQ_CMD_CANCEL_QUEUE     21
 #define RQ_CMD_CLOSING          22
 #define RQ_CMD_SERVER_FULL      23
-#define RQ_CMD_CONTROLLER       24
 
 #define RQ_CMD_NOREPLY          30
 #define RQ_CMD_EXCLUSIVE        31

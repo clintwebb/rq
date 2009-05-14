@@ -4,8 +4,13 @@ ARGS=-g -Wall -O2
 # -fprofile-arcs -ftest-coverage
 # -pg
 
-H_settings=settings.h
-H_system_data=system_data.h /usr/include/rq.h
+
+HH_rq=/usr/include/rq.h
+HH_linklist=/usr/include/linklist.h
+
+H_controllers=controllers.h $(HH_linklist)
+H_settings=settings.h $(HH_linklist)
+H_system_data=system_data.h $(HH_rq)
 H_stats=stats.h $(H_system_data)
 H_data=data.h
 H_message=message.h $(H_system_data)
@@ -19,7 +24,11 @@ H_actions=actions.h
 H_signals=signals.h
 
 
-OBJS=rqd.o daemon.o settings.o stats.o data.o server.o node.o queue.o commands.o process.o message.o send.o actions.o signals.o
+OBJS=rqd.o daemon.o settings.o \
+     stats.o data.o server.o   \
+     node.o queue.o commands.o \
+     process.o message.o send.o \
+     actions.o signals.o controllers.o
 
 # DEBUG_LIBS=-lefence
 DEBUG_LIBS=
@@ -34,6 +43,9 @@ actions.o: actions.c $(H_actions) $(H_server) $(H_stats) $(H_queue)
 
 commands.o: commands.c $(H_commands) $(H_node) $(H_process)  $(H_send)
 	gcc -c -o $@ $(ARGS) commands.c
+
+controllers.o: controllers.c $(H_controllers) $(H_node) $(H_queue) $(H_send) $(H_server) $(H_system_data) $(HH_rq)
+	gcc -c -o $@ $(ARGS) controllers.c
 
 data.o: data.c $(H_data)
 	gcc -c -o $@ $(ARGS) data.c
@@ -53,7 +65,7 @@ process.o: process.c $(H_process) $(H_send) $(H_queue) $(H_message) $(H_stats)
 queue.o: queue.c $(H_queue) $(H_server) $(H_send) $(H_actions)
 	gcc -c -o $@ $(ARGS) queue.c
 
-rqd.o: rqd.c daemon.h $(H_actions) $(H_commands) $(H_server) $(H_settings) $(H_stats) $(H_system_data) $(H_signals) $(H_queue)
+rqd.o: rqd.c daemon.h $(H_actions) $(H_commands) $(H_server) $(H_settings) $(H_stats) $(H_system_data) $(H_signals) $(H_queue) $(H_controllers)
 	gcc -c -o $@ $(ARGS) rqd.c
 
 send.o: send.c $(H_send) $(H_queue)
@@ -62,7 +74,7 @@ send.o: send.c $(H_send) $(H_queue)
 server.o: server.c $(H_server) $(H_commands) $(H_queue) $(H_settings)
 	gcc -c -o $@ $(ARGS) server.c
 
-settings.o: settings.c $(H_settings)
+settings.o: settings.c $(H_settings) $(HH_rq)
 	gcc -c -o $@ $(ARGS) settings.c
 
 signals.o: signals.c $(H_signals) $(H_system_data) $(H_server) $(H_stats) $(H_queue)

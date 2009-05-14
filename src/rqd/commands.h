@@ -17,6 +17,7 @@ void cmdCancelQueue(void *base);
 void cmdReceived(void *base);
 void cmdDelivered(void *base);
 void cmdExclusive(void *base);
+void cmdClosing(void *base);
 
 void cmdPing(void *base);
 void cmdPong(void *base);

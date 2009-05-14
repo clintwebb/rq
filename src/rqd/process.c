@@ -193,6 +193,15 @@ void processClosing(node_t *node)
 {
 	// if the node is a regular consumer then we cancel all the queues that do not have pending requests for this node.
 	assert(0);
+
+	// if this is a regular consumer, we would close the socket if there are no replies that are ready to go down the pipe.
+	assert(0);
+
+	// mark the node as closing so that as soon as all the messages have completed, the node can be shutdown.
+	assert(0);
+
+	// if this node is a controller, then we may need to do something to handle it.  Although it is likely that nothign would be done until the connection is actually lost.
+	assert(0);
 }
 
 void processServerFull(node_t *node)
@@ -207,12 +216,6 @@ void processQueueLink(node_t *node)
 	assert(0);
 }
 
-void processController(node_t *node)
-{
-	// the node is announcing that it is a controller.  We therefore need to
-	// send it a CONSUME QUEUE request for every queue that we have in our list..
-	assert(0);
-}
 
 //-----------------------------------------------------------------------------
 // We've received a broadcast message that is not a request, and doesn't
@@ -331,7 +334,7 @@ void processDelivered(node_t *node)
 			// set action to remove the message.
 			message_delete(msg);
 
-			// if there are more messages in the queue, then we need to set an action to deliver them.
+			// if there are more messages in the queue, then we need to deliver them.
 			if (ll_count(&q->msg_pending) > 0) {
 			
 				if (node->sysdata->verbose > 1) printf("delivery(%d): setting delivery action.\n", msgid);

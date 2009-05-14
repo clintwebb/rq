@@ -135,7 +135,7 @@ void message_delete(message_t *msg)
 		mempool_return(msg->sysdata->msgpool, msg);
 	}
 	else {
-		if (msg->sysdata->verbose > 1)
+		if (msg->sysdata->verbose)
 			printf("Unable to delete message(%X) since it is still referenced somewhere\n", (unsigned int)msg);
 	}
 }

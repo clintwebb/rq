@@ -8,6 +8,7 @@
 
 #include "actions.h"
 #include "commands.h"
+#include "controllers.h"
 #include "daemon.h"
 #include "queue.h"
 #include "server.h"
@@ -70,92 +71,63 @@ void get_options(settings_t *settings, int argc, char **argv)
 	
 	// process arguments 
 	while ((c = getopt(argc, argv,
-		"hv"	/* help, version */
+		"hv"	/* help, verbose */
 		
-		"c:"  /* max number of connections */
-		"d:"  /* run as daemon */
-		"u:"  /* user to run as */
+		"C:"  /* max number of connections */
+		"D:"  /* run as daemon */
+		"U:"  /* user to run as */
 		"P:"  /* pid file */
-		"l:"  /* interfaces to bind to */
-
+		"S:"	/* Server to connect to, can be supplied more than once. */
+		
+		"i:"  /* interfaces to bind to */
 		"p:"  /* port to listen on. */
-		"a:"
-		"A:"
-		"b:"
-		"B:"
-		"L:"  /*  logfile */
+		"l:"  /*  logfile */
 	)) != -1) {
 		switch (c) {
-			case 'p':
-				settings->port = atoi(optarg);
-				assert(settings->port > 0);
-				break;
-			case 'c':
-				settings->maxconns = atoi(optarg);
-				assert(settings->maxconns > 0);
-				break;
-			
-			case 'a':
-				assert(settings->primary == NULL);
-				settings->primary = optarg;
-				assert(settings->primary != NULL);
-				assert(settings->primary[0] != '\0');
-			case 'A':
-				settings->priport = atoi(optarg);
-				assert(settings->priport > 0);
-				break;
 
-			case 'b':
-				assert(settings->secondary == NULL);
-				settings->secondary = optarg;
-				assert(settings->secondary != NULL);
-				assert(settings->secondary[0] != '\0');
-			case 'B':
-				settings->secport = atoi(optarg);
-				assert(settings->secport > 0);
-				break;
-
-			case 'L':
-				assert(settings->logfile == NULL);
-				settings->logfile = optarg;
-				break;
-
+			/// common daemon options.
+		
 			case 'h':
 				usage();
 				exit(EXIT_SUCCESS);
 			case 'v':
 				settings->verbose++;
 				break;
-			case 'd':
+			case 'C':
+				settings->maxconns = atoi(optarg);
+				assert(settings->maxconns > 0);
+				break;
+			case 'S':
+				ll_push_tail(&settings->controllers, optarg);
+				break;
+			case 'D':
 				assert(settings->daemonize == false);
 				settings->daemonize = true;
 				break;
-			case 'u':
-				assert(settings->username == NULL);
+			case 'U':
 				settings->username = optarg;
-				assert(settings->username != NULL);
-				assert(settings->username[0] != '\0');
 				break;
 			case 'P':
-				assert(settings->pid_file == NULL);
 				settings->pid_file = optarg;
-				assert(settings->pid_file != NULL);
-				assert(settings->pid_file[0] != '\0');
 				break;
-			case 'l':
-				assert(settings->interfaces >= 0);
 
+			/// instance specific daemon options.
+
+			case 'p':
+				settings->port = atoi(optarg);
+				break;
+			
+			case 'l':
+				settings->logfile = optarg;
+				break;
+
+			case 'i':
 				if (settings->interfaces >= MAX_INTERFACES) {
 					fprintf(stderr, "Too many interfaces specified.  Only %d allowed.\n", MAX_INTERFACES);
 					exit(EXIT_FAILURE);
 				}
-					
-				assert(settings->interface[settings->interfaces] == NULL);
-
 				settings->interface[settings->interfaces] = strdup(optarg);
 				settings->interfaces++;
-
-				assert(settings->interfaces > 0);
 				break;
 				
 			default:
@@ -178,6 +150,9 @@ int main(int argc, char **argv)
 	stats_t        *stats    = NULL;
 	action_t       *action   = NULL;
 	queue_t        *q;
+	char           *str;
+	controller_t   *ct;
+	void           *next;
 
 	system_data_t   sysdata;
 	int i;
@@ -187,19 +162,20 @@ int main(int argc, char **argv)
 ///============================================================================
 
 	// initialise our system data object.
-	sysdata.evbase    = NULL;
-	sysdata.bufpool   = NULL;
-	sysdata.verbose   = 0;
-	sysdata.settings  = NULL;
-	sysdata.server    = NULL;
-	sysdata.stats     = NULL;
-	sysdata.actpool   = NULL;
-	sysdata.risp      = NULL;
-	sysdata.queues    = NULL;
-	sysdata.msgpool   = NULL;
+	sysdata.evbase       = NULL;
+	sysdata.bufpool      = NULL;
+	sysdata.verbose      = 0;
+	sysdata.settings     = NULL;
+	sysdata.server       = NULL;
+	sysdata.stats        = NULL;
+	sysdata.actpool      = NULL;
+	sysdata.risp         = NULL;
+	sysdata.queues       = NULL;
+	sysdata.msgpool      = NULL;
 	sysdata.sighup_event = NULL;
 	sysdata.sigint_event = NULL;
-	sysdata.nodelist = NULL;
+	sysdata.nodelist     = NULL;
+	sysdata.controllers  = NULL;
 
 
 	// init settings
@@ -328,6 +304,7 @@ int main(int argc, char **argv)
 	risp_add_command(sysdata.risp, RQ_CMD_NOREPLY,      &cmdNoReply);
 	risp_add_command(sysdata.risp, RQ_CMD_CONSUME,      &cmdConsume);
 	risp_add_command(sysdata.risp, RQ_CMD_CANCEL_QUEUE, &cmdCancelQueue);
+	risp_add_command(sysdata.risp, RQ_CMD_CLOSING,      &cmdClosing);
 	risp_add_command(sysdata.risp, RQ_CMD_EXCLUSIVE,    &cmdExclusive);
 	risp_add_command(sysdata.risp, RQ_CMD_ID,           &cmdId);
 	risp_add_command(sysdata.risp, RQ_CMD_TIMEOUT,      &cmdTimeout);
@@ -340,15 +317,10 @@ int main(int argc, char **argv)
 	sysdata.nodelist = (list_t *) malloc(sizeof(list_t));
 	assert(sysdata.nodelist);
 	ll_init(sysdata.nodelist);
+	
+	sysdata.controllers = (list_t *) malloc(sizeof(list_t));
+	ll_init(sysdata.controllers);
 
-	// connect to other controller.
-	if (settings->primary != NULL) {
-		// when the connection is established, we need to send a QUEUELIST command
-		// to the other controller so that it can give us a list of QUEUES that it
-		// is consuming.
-
-		assert(0);
-	}
 
 	// Create the message pool.
 	sysdata.msgpool = (mempool_t *) malloc(sizeof(mempool_t));
@@ -360,6 +332,20 @@ int main(int argc, char **argv)
 	ll_init(sysdata.queues);
 	assert(sysdata.queues);
 	
+	// now that everything else is configured, connect to other controllers.
+	next = ll_start(&settings->controllers);
+	while ((str = ll_next(&settings->controllers, &next))) {
+		// The controller will not actually have any distinction between regular consumers and other controllers.
+		ct = (controller_t *) malloc(sizeof(controller_t));
+		controller_init(ct, str);
+		ct->sysdata = &sysdata;
+
+		if (settings->verbose>1) printf("Connecting to controller: %s.\n", str);
+		controller_connect(ct);
+		ll_push_tail(sysdata.controllers, ct);
+		ct = NULL;
+	}
+
 ///============================================================================
 /// Main Event Loop.
 ///============================================================================
@@ -446,6 +432,18 @@ int main(int argc, char **argv)
 	action_pool_free(sysdata.actpool);
 	free(sysdata.actpool);
 	sysdata.actpool = NULL;
+
+
+	// cleanup the list of controllers.
+	assert(sysdata.controllers);
+	while ((ct = ll_pop_head(sysdata.controllers))) {
+		controller_free(ct);
+		free(ct);
+	}
+	ll_free(sysdata.controllers);
+	free(sysdata.controllers);
+	sysdata.controllers = NULL;
+	
 
 	// cleanup the settings object.
 	assert(settings != NULL);

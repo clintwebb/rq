@@ -8,6 +8,7 @@
 #include <mempool.h>
 #include <risp.h>
 
+
 typedef struct {
 	struct event_base *evbase;
 	risp_t *risp;
@@ -26,6 +27,7 @@ typedef struct {
 	void *stats;
 	list_t *queues;
 	list_t *nodelist;
+	list_t *controllers;
 } system_data_t;
 
 

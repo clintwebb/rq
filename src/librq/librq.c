@@ -688,11 +688,9 @@ static void rq_connect(rq_t *rq)
 
         sock = socket(AF_INET,SOCK_STREAM,0);
         if (sock >= 0) {
-					int opts;
-
+					
 					// Before we attempt to connect, set the socket to non-blocking mode.
-					opts = fcntl(sock, F_GETFL);
-					if (opts >= 0) { fcntl(sock, F_SETFL, (opts | O_NONBLOCK)); }
+					evutil_make_socket_nonblocking(sock);
 
 					result = connect(sock, (struct sockaddr*)&sin, sizeof(struct sockaddr));
 					if (result < 0 && errno == EINPROGRESS) {

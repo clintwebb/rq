@@ -3,8 +3,13 @@
 #include "settings.h"
 
 #include <assert.h>
+#include <rq.h>
 
 
+
+
+//-----------------------------------------------------------------------------
+// Initialise the settings structure.
 void settings_init(settings_t *ptr)
 {
 	int i;
@@ -23,11 +28,19 @@ void settings_init(settings_t *ptr)
 		ptr->interface[i] = NULL;
 	}
 
+	ll_init(&ptr->controllers);
+
 	ptr->logfile = NULL;
 }
 
+
+//-----------------------------------------------------------------------------
+// Cleanup the resources allocated int he settings object.   Currently this
+// just includes the list of controllers.
 void settings_cleanup(settings_t *ptr) 
 {
 	assert(ptr != NULL);
+	ll_free(&ptr->controllers);
 }
+
 

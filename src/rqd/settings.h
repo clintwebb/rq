@@ -1,28 +1,33 @@
 #ifndef __SETTINGS_H
 #define __SETTINGS_H
 
-#include <rq.h>
+#include <linklist.h>
+#include <sys/socket.h>
 
 #define MAX_INTERFACES	5
 #define DEFAULT_MAXCONNS 128
 
+
+
+
+
 typedef struct {
 	// running params
-	int port;
 	int maxconns;
-	bool verbose;
-	bool daemonize;
+	char verbose;
+	char daemonize;
 	char *username;
 	char *pid_file;
 
+	// interfaces that we will bind to.
 	char *interface[MAX_INTERFACES];
 	int interfaces;
 
+	// port that we will listen on, on all interfaces.
+	int port;
+
 	// connections to other controllers.
-	char *primary;
-	char *secondary;
-	int priport;
-	int secport;
+	list_t controllers;
 
 	// logfile
 	char *logfile;
