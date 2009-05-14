@@ -23,7 +23,7 @@ typedef struct {
 	int handle;
 	unsigned short flags;
 	struct event *read_event, *write_event;
-	expbuf_t *in, *waiting, *out, *build;
+	expbuf_t *waiting, *out;
 	data_t data;
 	system_data_t *sysdata;
 	list_t in_msg, out_msg;

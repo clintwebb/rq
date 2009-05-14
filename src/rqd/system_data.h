@@ -17,6 +17,8 @@ typedef struct {
 
 	struct event *sighup_event;
 	struct event *sigint_event;
+
+	expbuf_t *in_buf, *build_buf;
 	
 	int verbose;
 	void *settings;

@@ -254,6 +254,12 @@ int main(int argc, char **argv)
 	sysdata.actpool = (action_pool_t *) malloc(sizeof(action_pool_t));
 	action_pool_init(sysdata.actpool, sysdata.evbase, &sysdata);
 
+	// create our common buffers.
+	sysdata.in_buf = (expbuf_t *) malloc(sizeof(expbuf_t));
+	sysdata.build_buf = (expbuf_t *) malloc(sizeof(expbuf_t));
+	expbuf_init(sysdata.in_buf, DEFAULT_BUFFSIZE);
+	expbuf_init(sysdata.build_buf, 0);
+
 	// create and init the 'server' structure.
 	if (settings->verbose) printf("Starting server listener on port %d.\n", settings->port);
 	server = (server_t *) malloc(sizeof(server_t));
@@ -403,6 +409,15 @@ int main(int argc, char **argv)
 	risp_shutdown(sysdata.risp);
 	sysdata.risp = NULL;
     
+	// free our common buffers.
+	assert(sysdata.in_buf && sysdata.build_buf);
+	expbuf_free(sysdata.in_buf);
+	expbuf_free(sysdata.build_buf);
+	free(sysdata.in_buf);
+	free(sysdata.build_buf);
+	sysdata.in_buf = NULL;
+	sysdata.build_buf = NULL;
+
 	if (sysdata.verbose) printf("\n\nExiting.\n");
     
 	// remove the PID file if we're a daemon

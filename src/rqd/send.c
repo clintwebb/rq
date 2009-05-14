@@ -15,20 +15,25 @@
 // 
 void sendConsumeReply(node_t *node, char *queue, int qid)
 {
+	expbuf_t *build;
+
 	assert(node != NULL);
 	assert(queue != NULL);
 	assert(qid > 0 && qid <= 0xffff);
-	assert(node->build);
-	assert(node->build->length == 0);
+
+	assert(node->sysdata);
+	assert(node->sysdata->build_buf);
+	build = node->sysdata->build_buf;
+	assert(build->length == 0);
 
 	// add the commands to the out queue.
-	addCmd(node->build, RQ_CMD_CLEAR);
-	addCmdInt(node->build, RQ_CMD_QUEUEID, qid);
-	addCmdShortStr(node->build, RQ_CMD_QUEUE, strlen(queue), queue);
-	addCmd(node->build, RQ_CMD_EXECUTE);
+	addCmd(build, RQ_CMD_CLEAR);
+	addCmdInt(build, RQ_CMD_QUEUEID, qid);
+	addCmdShortStr(build, RQ_CMD_QUEUE, strlen(queue), queue);
+	addCmd(build, RQ_CMD_EXECUTE);
 
-	node_write_now(node, node->build->length, node->build->data);
-	expbuf_clear(node->build);
+	node_write_now(node, build->length, build->data);
+	expbuf_clear(build);
 }
 
 //-----------------------------------------------------------------------------
@@ -36,12 +41,16 @@ void sendConsumeReply(node_t *node, char *queue, int qid)
 void sendMessage(node_t *node, message_t *msg)
 {
 	queue_t *q;
+	expbuf_t *build;
 	
 	assert(node != NULL);
 	assert(msg != NULL);
 	assert(node->sysdata == msg->sysdata);
-	assert(node->build != NULL);
-	assert(node->build->length == 0);
+
+	assert(node->sysdata);
+	assert(node->sysdata->build_buf);
+	build = node->sysdata->build_buf;
+	assert(build->length == 0);
 
 	assert(msg->data);
 	assert(msg->queue);
@@ -53,7 +62,7 @@ void sendMessage(node_t *node, message_t *msg)
 
 
 	// add the commands to the out queue.
-	addCmd(node->build, RQ_CMD_CLEAR);
+	addCmd(build, RQ_CMD_CLEAR);
 
 	if (BIT_TEST(msg->flags, FLAG_MSG_BROADCAST)) {
 		// We are sending a broadcast message
@@ -61,49 +70,54 @@ void sendMessage(node_t *node, message_t *msg)
 		assert(msg->id == 0);
 		assert(msg->target_node == NULL);
 
-		addCmd(node->build, RQ_CMD_BROADCAST);
-		addCmd(node->build, RQ_CMD_NOREPLY);
+		addCmd(build, RQ_CMD_BROADCAST);
+		addCmd(build, RQ_CMD_NOREPLY);
 	}
 	else {
 		assert(msg->target_node);
 
 		if (BIT_TEST(msg->flags, FLAG_MSG_NOREPLY)) 
-			addCmd(node->build, RQ_CMD_NOREPLY);
+			addCmd(build, RQ_CMD_NOREPLY);
 		
-		addCmd(node->build, RQ_CMD_REQUEST);
+		addCmd(build, RQ_CMD_REQUEST);
 
 		assert(msg->id > 0);
-		addCmdLargeInt(node->build, RQ_CMD_ID, msg->id);
+		addCmdLargeInt(build, RQ_CMD_ID, msg->id);
 	}
 
-	addCmdInt(node->build, RQ_CMD_QUEUEID, q->qid);
-	addCmdLargeStr(node->build, RQ_CMD_PAYLOAD, msg->data->length, msg->data->data);
-	addCmd(node->build, RQ_CMD_EXECUTE);
+	addCmdInt(build, RQ_CMD_QUEUEID, q->qid);
+	addCmdLargeStr(build, RQ_CMD_PAYLOAD, msg->data->length, msg->data->data);
+	addCmd(build, RQ_CMD_EXECUTE);
 
-	node_write_now(node, node->build->length, node->build->data);
-	expbuf_clear(node->build);
+	node_write_now(node, build->length, build->data);
+	expbuf_clear(build);
 }
 
 
 
 void sendUndelivered(node_t *node, message_t *msg)
 {
+	expbuf_t *build;
+	
 	assert(node != NULL);
 	assert(msg != NULL);
-	assert(node->build);
-	assert(node->build->length == 0);
+
+	assert(node->sysdata);
+	assert(node->sysdata->build_buf);
+	build = node->sysdata->build_buf;
+	assert(build->length == 0);
 
 	// add the commands to the out queue.
-	addCmd(node->build, RQ_CMD_CLEAR);
-	addCmd(node->build, RQ_CMD_UNDELIVERED);
+	addCmd(build, RQ_CMD_CLEAR);
+	addCmd(build, RQ_CMD_UNDELIVERED);
 	
 	assert(0);
-// 	addCmdInt(node->build, RQ_CMD_QUEUEID, qid);
-// 	addCmdShortStr(node->build, RQ_CMD_QUEUE, strlen(queue), queue);
-	addCmd(node->build, RQ_CMD_EXECUTE);
+// 	addCmdInt(build, RQ_CMD_QUEUEID, qid);
+// 	addCmdShortStr(build, RQ_CMD_QUEUE, strlen(queue), queue);
+	addCmd(build, RQ_CMD_EXECUTE);
 
-	node_write_now(node, node->build->length, node->build->data);
-	expbuf_clear(node->build);
+	node_write_now(node, build->length, build->data);
+	expbuf_clear(build);
 }
 
 
@@ -112,17 +126,22 @@ void sendUndelivered(node_t *node, message_t *msg)
 // node needs to attempt to connect to the secondary controller.
 void sendClosing(node_t *node)
 {
+	expbuf_t *build;
+	
 	assert(node != NULL);
-	assert(node->build);
-	assert(node->build->length == 0);
+	
+	assert(node->sysdata);
+	assert(node->sysdata->build_buf);
+	build = node->sysdata->build_buf;
+	assert(build->length == 0);
 
 	// add the commands to the out queue.
-	addCmd(node->build, RQ_CMD_CLEAR);
-	addCmd(node->build, RQ_CMD_CLOSING);
-	addCmd(node->build, RQ_CMD_EXECUTE);
+	addCmd(build, RQ_CMD_CLEAR);
+	addCmd(build, RQ_CMD_CLOSING);
+	addCmd(build, RQ_CMD_EXECUTE);
 	
-	node_write_now(node, node->build->length, node->build->data);
-	expbuf_clear(node->build);
+	node_write_now(node, build->length, build->data);
+	expbuf_clear(build);
 }
 
 
@@ -131,33 +150,28 @@ void sendClosing(node_t *node)
 // queue that another node is consuming.
 void sendConsume(node_t *node, char *queue, short int max, unsigned char priority)
 {
+	expbuf_t *build;
+	
 	assert(node);
 	assert(queue);
 	assert(max >= 0);
 
+	assert(node->sysdata);
+	assert(node->sysdata->build_buf);
+	build = node->sysdata->build_buf;
+	assert(build->length == 0);
+
 	assert(BIT_TEST(node->flags, FLAG_NODE_CONTROLLER));
 
-	// if we dont yet have a 'build' buffer then we will get one.
-	if (node->build == NULL) {
-		assert(node->sysdata != NULL);
-		assert(node->sysdata->bufpool != NULL);
-		node->build = expbuf_pool_new(node->sysdata->bufpool, 64);
-	}
-	assert(node->build != NULL);
-
 	// add the commands to the out queue.
-	assert(node->build->length == 0);
-	addCmd(node->build, RQ_CMD_CLEAR);
-	addCmdShortStr(node->build, RQ_CMD_QUEUE, strlen(queue), queue);
-	addCmdInt(node->build, RQ_CMD_MAX, max);
-	addCmdShortInt(node->build, RQ_CMD_PRIORITY, priority);
-	addCmd(node->build, RQ_CMD_EXECUTE);
+	addCmd(build, RQ_CMD_CLEAR);
+	addCmdShortStr(build, RQ_CMD_QUEUE, strlen(queue), queue);
+	addCmdInt(build, RQ_CMD_MAX, max);
+	addCmdShortInt(build, RQ_CMD_PRIORITY, priority);
+	addCmd(build, RQ_CMD_EXECUTE);
 
-	assert(node->build->length > 0);
-	assert(node->build->length <= node->build->max);
-	assert(node->build->data != NULL);
-	node_write_now(node, node->build->length, node->build->data);
-	expbuf_clear(node->build);
+	node_write_now(node, build->length, build->data);
+	expbuf_clear(build);
 }
 
 
@@ -166,29 +180,38 @@ void sendConsume(node_t *node, char *queue, short int max, unsigned char priorit
 // Send the ping command.
 void sendPing(node_t *node)
 {
+	expbuf_t *build;
+	
 	assert(node != NULL);
-	assert(node->build);
-	assert(node->build->length == 0);
+
+	assert(node->sysdata);
+	assert(node->sysdata->build_buf);
+	build = node->sysdata->build_buf;
+	assert(build->length == 0);
 
 	// add the commands to the out queue.
-	addCmd(node->build, RQ_CMD_PING);
+	addCmd(build, RQ_CMD_PING);
 	
-	node_write_now(node, node->build->length, node->build->data);
-	expbuf_clear(node->build);
+	node_write_now(node, build->length, build->data);
+	expbuf_clear(build);
 }
 
 //-----------------------------------------------------------------------------
 // Send the pong command.
 void sendPong(node_t *node)
 {
+	expbuf_t *build;
+	
 	assert(node != NULL);
-	assert(node->build);
-	assert(node->build->length == 0);
+	assert(node->sysdata);
+	assert(node->sysdata->build_buf);
+	build = node->sysdata->build_buf;
+	assert(build->length == 0);
 
 	// add the commands to the out queue.
-	addCmd(node->build, RQ_CMD_PONG);
+	addCmd(build, RQ_CMD_PONG);
 	
-	node_write_now(node, node->build->length, node->build->data);
-	expbuf_clear(node->build);
+	node_write_now(node, build->length, build->data);
+	expbuf_clear(build);
 }
 

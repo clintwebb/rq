@@ -37,10 +37,8 @@ void node_init(node_t *node, system_data_t *sysdata)
 	assert(sysdata->bufpool != NULL);
 	
   assert(DEFAULT_BUFFSIZE > 0);
-  node->in      = expbuf_pool_new(sysdata->bufpool, DEFAULT_BUFFSIZE);
 	node->waiting = expbuf_pool_new(sysdata->bufpool, DEFAULT_BUFFSIZE);
 	node->out     = expbuf_pool_new(sysdata->bufpool, DEFAULT_BUFFSIZE);
-	node->build   = expbuf_pool_new(sysdata->bufpool, 16);
 
 	ll_init(&node->in_msg);
 	ll_init(&node->out_msg);
@@ -83,12 +81,6 @@ void node_free(node_t *node)
 	assert(node->write_event == NULL);
 	
 
-	// delete the expanding buffers.
-	assert(node->in);
-	assert(node->in->length == 0);
-	expbuf_pool_return(sysdata->bufpool, node->in);
-	node->in = NULL;
-	
 	assert(node->out);
 	expbuf_clear(node->out);
 	expbuf_pool_return(sysdata->bufpool, node->out);
@@ -98,11 +90,6 @@ void node_free(node_t *node)
 	expbuf_clear(node->waiting);
 	expbuf_pool_return(sysdata->bufpool, node->waiting);
 	node->waiting = NULL;
-
-	assert(node->build);
-	assert(node->build->length == 0);
-	expbuf_pool_return(sysdata->bufpool, node->build);
-	node->build = NULL;
 
 	// make sure that all the messages for this node have been processed first.
 	// And then free the memory that was used for the list.
@@ -276,6 +263,7 @@ void node_read_handler(int hid, short flags, void *data)
 	node_t *node = (node_t *) data;
 	int res, empty;
 	stats_t *stats;
+	expbuf_t *in;
 
 	assert(hid >= 0);
 	assert(node);
@@ -284,10 +272,11 @@ void node_read_handler(int hid, short flags, void *data)
 	assert(node->handle == hid);
 	assert(node->sysdata->stats);
 	assert(node->sysdata->bufpool);
-	assert(node->in);
+	assert(node->sysdata->in_buf);
 	assert(node->read_event);
 
 	stats = node->sysdata->stats;
+	in = node->sysdata->in_buf;
 
 	if (flags & EV_TIMEOUT) {
 		// idle
@@ -309,20 +298,20 @@ void node_read_handler(int hid, short flags, void *data)
 	
 		empty = 0;
 		while (empty == 0) {
-			assert(node->in->length == 0 && node->in->max > 0 && node->in->data != NULL);
+			assert(in->length == 0 && in->max > 0 && in->data != NULL);
 			assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE));
 			assert(node->handle >= 0);
 			
-			res = read(node->handle, node->in->data, node->in->max);
+			res = read(node->handle, in->data, in->max);
 			if (res > 0) {
-				assert(res <= node->in->max);
+				assert(res <= in->max);
 				stats->in_bytes += res;
-				node->in->length = res;
+				in->length = res;
 	
 				// if we pulled out the max we had avail in our buffer, that means we
 				// can pull out more at a time, so increase our incoming buffer.
-				if (res == node->in->max) {
-					expbuf_shrink(node->in, node->in->max + DEFAULT_BUFFSIZE);
+				if (res == in->max) {
+					expbuf_shrink(in, in->max + DEFAULT_BUFFSIZE);
 					assert(empty == 0);
 				}
 				else { empty = 1; }
@@ -330,10 +319,10 @@ void node_read_handler(int hid, short flags, void *data)
 				assert(node->waiting);
 				if (node->waiting->length > 0) {
 					// we have data left in the in-buffer, so we add the content of the node->in buffer
-					assert(node->in->length > 0);
-					expbuf_add(node->waiting, node->in->data, node->in->length);
-					expbuf_clear(node->in);
-					assert(node->in->length == 0);
+					assert(in->length > 0);
+					expbuf_add(node->waiting, in->data, in->length);
+					expbuf_clear(in);
+					assert(in->length == 0);
 					assert(node->waiting->length > 0 && node->waiting->data != NULL);
 	
 					assert(node->sysdata->risp != NULL);
@@ -345,16 +334,16 @@ void node_read_handler(int hid, short flags, void *data)
 				else {
 					// there is no data in the waiting-buffer, we will process the node->in buffer by itself.
 					assert(node->sysdata->risp != NULL);
-					res = risp_process(node->sysdata->risp, node, node->in->length, (unsigned char *) node->in->data);
-					assert(res <= node->in->length);
+					res = risp_process(node->sysdata->risp, node, in->length, (unsigned char *) in->data);
+					assert(res <= in->length);
 					assert(res >= 0);
-					if (res > 0) { expbuf_purge(node->in, res); }
+					if (res > 0) { expbuf_purge(in, res); }
 	
 					// if there is data left over, then we need to add it to our in-buffer.
-					if (node->in->length > 0) {
+					if (in->length > 0) {
 						assert(node->waiting);
-						expbuf_add(node->waiting, node->in->data, node->in->length);
-						expbuf_clear(node->in);
+						expbuf_add(node->waiting, in->data, in->length);
+						expbuf_clear(in);
 					}
 				}
 			}
