@@ -42,8 +42,8 @@ void stats_display(stats_t *stats, system_data_t *sysdata)
 	
 	server = sysdata->server;
 
-	assert(server->active >= 0);
-	clients = server->active;
+// 	assert(server->active >= 0);
+	clients = ll_count(sysdata->nodelist);
 
 // 	queues = ll_count(sysdata->queues);
 

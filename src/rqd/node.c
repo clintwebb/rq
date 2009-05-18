@@ -63,14 +63,14 @@ void node_free(node_t *node)
 	system_data_t *sysdata;
 	
 	assert(node != NULL);
+	assert(node->out != NULL);
 
 	assert(node->sysdata != NULL);
 	sysdata = node->sysdata;
 	
 	assert(sysdata->bufpool != NULL);
-
 	assert(node->controller == NULL);
-	
+
 	node->flags = 0;
 	
 	assert(node->handle == INVALID_HANDLE);
@@ -120,17 +120,45 @@ static void node_closed(node_t *node)
 	message_t *msg;
 	server_t *server;
 	system_data_t *sysdata;
+	action_t *action;
+	controller_t *ct;
 	
 	assert(node);
 	assert(node->sysdata);
 	assert(node->sysdata->queues);
+	assert(node->out);
 
 	// we've definately lost connection to the node, so we need to mark it by
 	// clearing the handle.
 	assert(node->handle == INVALID_HANDLE);
 
-	// we need to remove the consume on the queues.
-	queue_cancel_node(node);
+	if (node->controller) {
+		assert(BIT_TEST(node->flags, FLAG_NODE_CONTROLLER));
+		assert(BIT_TEST(node->flags, FLAG_CONTROLLER_CONNECTING) == 0);
+
+		ct = node->controller;
+		assert(ct);
+
+		// we need to remove the consume on the queues.
+		queue_cancel_node(node);
+
+		assert(ct->connect_event == NULL);
+
+		//set the action so that we can attempt to reconnect.
+		assert(node->sysdata->actpool);
+		action = action_pool_new(node->sysdata->actpool);
+		action_label(action, "ah_controller_connect-node");
+		action_set(action, 1000, ah_controller_connect, ct);
+		action = NULL;
+
+		ct->node = NULL;
+		node->controller = NULL;
+	}
+	else {
+		// we need to remove the consume on the queues.
+		assert(BIT_TEST(node->flags, FLAG_NODE_CONTROLLER) == 0);
+		queue_cancel_node(node);
+	}
 
 	// we need to remove (return) any messages that this node was processing.
 	while ((msg = ll_pop_head(&node->out_msg)) != NULL) {
@@ -151,7 +179,6 @@ static void node_closed(node_t *node)
 		// we have a message that we need to deal with.
 		assert(0);
 	}
-
 
 	if (node->write_event) {
 		event_del(node->write_event);
@@ -174,7 +201,6 @@ static void node_closed(node_t *node)
 	assert(server);
 	assert(ll_count(sysdata->nodelist) > 0);
 	ll_remove(sysdata->nodelist, node, NULL);
-	server->active --;
 
 	// free the resources used by the node.
 	node_free(node);
@@ -236,6 +262,7 @@ void node_write_now(node_t *node, int length, char *data)
 		else if (res == 0) {
 			if (node->sysdata->verbose > 1)
 				printf("Node[%d] closed while writing.\n", node->handle);
+			assert(node->out);
 			node->handle = INVALID_HANDLE;
 			node_closed(node);
 			assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE) == 0);
@@ -361,6 +388,7 @@ void node_read_handler(int hid, short flags, void *data)
 				if (res == 0) {
 					if (node->sysdata->verbose > 1)
 						printf("Node[%d] closed while reading.\n", node->handle);
+					assert(node->out);
 					node->handle = INVALID_HANDLE;
 					node_closed(node);
 					assert(empty != 0);
@@ -431,6 +459,7 @@ void node_write_handler(int hid, short flags, void *data)
 	}
 	else if (res == 0) {
 		if (node->sysdata->verbose > 1) printf("Node[%d] closed while writing.\n", node->handle);
+		assert(node->out);
 		node->handle = INVALID_HANDLE;
 		node_closed(node);
 		assert(BIT_TEST(node->flags, FLAG_NODE_ACTIVE) == 0);

@@ -18,7 +18,7 @@ typedef struct {
 		int handle;					          // socket handle
 		struct event *event;
 	} servers[MAX_SERVERS];
-	int                active;			// number of active nodes.
+// 	int                active;			// number of active nodes.
 	int                maxconns;		// max number of nodes.
 	system_data_t     *sysdata;
 } server_t;

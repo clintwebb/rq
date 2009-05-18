@@ -210,10 +210,20 @@ void processServerFull(node_t *node)
 	assert(0);
 }
 
+
+//-----------------------------------------------------------------------------
+// we would only get these from other controllers after we have made CONSUME
+// requests.   We need to go thru the queue list and find the one specified and
+// give it the qid.
 void processQueueLink(node_t *node)
 {
-	// we would only get these from other controllers after we have made CONSUME requests.
-	assert(0);
+	assert(node);
+	assert(BIT_TEST(node->data.mask, DATA_MASK_QUEUEID));
+	assert(BIT_TEST(node->data.mask, DATA_MASK_QUEUE));
+
+	assert(node->sysdata);
+	assert(node->sysdata->queues);
+	queue_set_id(node->sysdata->queues, expbuf_string(&node->data.queue), node->data.qid);
 }
 
 

@@ -152,7 +152,6 @@ int main(int argc, char **argv)
 	queue_t        *q;
 	char           *str;
 	controller_t   *ct;
-	void           *next;
 
 	system_data_t   sysdata;
 	int i;
@@ -258,8 +257,8 @@ int main(int argc, char **argv)
 		}
 	}
 
-	assert(sysdata.actpool != NULL);
-	assert(sysdata.server != NULL);
+	assert(sysdata.actpool);
+	assert(sysdata.server);
 
 	// initialise clock event.  The clock event is used to keep up our node 
 	// network.  If we dont have enough connections, we will need to make some 
@@ -284,6 +283,7 @@ int main(int argc, char **argv)
 	// setup an action to output the stats every second.
 	assert(sysdata.actpool != NULL);
 	action = action_pool_new(sysdata.actpool);
+	action_label(action, "ah_stats");
 	action_set(action, 1000, ah_stats, stats);
 	action = NULL;
 
@@ -306,6 +306,7 @@ int main(int argc, char **argv)
 	risp_add_command(sysdata.risp, RQ_CMD_CANCEL_QUEUE, &cmdCancelQueue);
 	risp_add_command(sysdata.risp, RQ_CMD_CLOSING,      &cmdClosing);
 	risp_add_command(sysdata.risp, RQ_CMD_EXCLUSIVE,    &cmdExclusive);
+	risp_add_command(sysdata.risp, RQ_CMD_QUEUEID,      &cmdQueueID);
 	risp_add_command(sysdata.risp, RQ_CMD_ID,           &cmdId);
 	risp_add_command(sysdata.risp, RQ_CMD_TIMEOUT,      &cmdTimeout);
 	risp_add_command(sysdata.risp, RQ_CMD_MAX,          &cmdMax);
@@ -315,7 +316,6 @@ int main(int argc, char **argv)
 
 	// create the nodelist list.
 	sysdata.nodelist = (list_t *) malloc(sizeof(list_t));
-	assert(sysdata.nodelist);
 	ll_init(sysdata.nodelist);
 	
 	sysdata.controllers = (list_t *) malloc(sizeof(list_t));
@@ -333,9 +333,8 @@ int main(int argc, char **argv)
 	assert(sysdata.queues);
 	
 	// now that everything else is configured, connect to other controllers.
-	next = ll_start(&settings->controllers);
-	while ((str = ll_next(&settings->controllers, &next))) {
-		// The controller will not actually have any distinction between regular consumers and other controllers.
+	assert(sysdata.controllers);
+	while ((str = ll_pop_head(&settings->controllers))) {
 		ct = (controller_t *) malloc(sizeof(controller_t));
 		controller_init(ct, str);
 		ct->sysdata = &sysdata;
@@ -361,6 +360,20 @@ int main(int argc, char **argv)
 /// Shutdown
 ///============================================================================
 
+	// Since the event loop has closed, there is no way that additional events
+	// can be added, so cleanup the action pool.
+	assert(sysdata.actpool != NULL);
+	printf("Actions: active=%d, inactive=%d\n", action_pool_active(sysdata.actpool), action_pool_inactive(sysdata.actpool));
+	if (action_pool_active(sysdata.actpool) > 0) {
+		printf("active action is %s.\n", action_getactivelabel(sysdata.actpool));
+	}
+	assert(action_pool_active(sysdata.actpool) == 0);
+	
+	action_pool_free(sysdata.actpool);
+	free(sysdata.actpool);
+	sysdata.actpool = NULL;
+
+	// clear the event base pointer, because no more events can be set.
 	sysdata.evbase = NULL;
 
 	// Cleanup the message pool.
@@ -379,6 +392,7 @@ int main(int argc, char **argv)
 	assert(sysdata.queues);
 	while ((q = ll_pop_head(sysdata.queues))) {
 		queue_free(q);
+		free(q);
 	}
 	ll_free(sysdata.queues);
 	free(sysdata.queues);
@@ -387,6 +401,7 @@ int main(int argc, char **argv)
 	// nodelist should already be empty, otherwise how did we break out of the loop?
 	assert(sysdata.nodelist);
 	assert(ll_count(sysdata.nodelist) == 0);
+	printf("nodelist\n");
 	ll_free(sysdata.nodelist);
 	free(sysdata.nodelist);
 	sysdata.nodelist = NULL;
@@ -427,12 +442,6 @@ int main(int argc, char **argv)
 	free(sysdata.bufpool);
 	sysdata.bufpool = NULL;
 
-	// cleanup the action pool.
-	assert(sysdata.actpool != NULL);
-	action_pool_free(sysdata.actpool);
-	free(sysdata.actpool);
-	sysdata.actpool = NULL;
-
 
 	// cleanup the list of controllers.
 	assert(sysdata.controllers);
@@ -440,10 +449,13 @@ int main(int argc, char **argv)
 		controller_free(ct);
 		free(ct);
 	}
+	printf("controllers\n");
 	ll_free(sysdata.controllers);
 	free(sysdata.controllers);
 	sysdata.controllers = NULL;
 	
+
+
 
 	// cleanup the settings object.
 	assert(settings != NULL);

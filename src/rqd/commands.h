@@ -23,6 +23,7 @@ void cmdPing(void *base);
 void cmdPong(void *base);
 
 void cmdId(void *base, risp_int_t value);
+void cmdQueueID(void *base, risp_int_t value);
 void cmdTimeout(void *base, risp_int_t value);
 void cmdMax(void *base, risp_int_t value);
 void cmdPriority(void *base, risp_int_t value);

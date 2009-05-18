@@ -32,8 +32,6 @@ void server_init(server_t *server, system_data_t *sysdata)
 	for(index=0; index<MAX_SERVERS; index++) {
 		server->servers[index].handle = INVALID_HANDLE;
 	}
-
-	server->active = 0;
 }
 
 
@@ -180,7 +178,6 @@ void server_cleanup(server_t *server)
 
 
 	// cleanup and free all of the allocated nodes which should all be cleaned out and idle now;
-	assert(server->active == 0);
 	assert(server->maxconns > 0);
 	
 	server->sysdata = NULL;
@@ -208,7 +205,6 @@ void server_event_handler(int hid, short flags, void *data)
 	struct sockaddr_storage addr;
 	int sfd;
 	node_t *node = NULL;
-	char tbuf[4];
 	
 	assert(hid >= 0);
 	assert(data != NULL);
@@ -233,31 +229,13 @@ void server_event_handler(int hid, short flags, void *data)
 		return;
 	}
 
-	if (server->active >= server->maxconns) {
-		assert(server->maxconns > 0);
-		if (server->sysdata->verbose) printf("Server is full.\n");
+	if (server->sysdata->verbose) printf("New Connection [%d]\n", sfd);
+	node = node_create(server->sysdata, sfd);
+	assert(node);
 
-		// we've reached our limit.
-		// TODO: we should really use a proper function to send this message out.
-		tbuf[0] = RQ_CMD_CLEAR;
-		tbuf[1] = RQ_CMD_SERVER_FULL;
-		tbuf[2] = RQ_CMD_EXECUTE;
-		send(sfd, tbuf, 3, 0);
-		close(sfd);
-	}
-	else {
-		if (server->sysdata->verbose) printf("New Connection [%d]\n", sfd);
-		node = node_create(server->sysdata, sfd);
-		assert(node);
-			
-		// mark socket as non-blocking
-		if (server->sysdata->verbose > 1) printf(" -- node(%d) setting non-blocking mode\n", sfd);
-		evutil_make_socket_nonblocking(sfd);
-
-		server->active ++;
-		assert(server->active > 0);
-		assert(server->active <= server->maxconns);
-	}
+	// mark socket as non-blocking
+	if (server->sysdata->verbose > 1) printf(" -- node(%d) setting non-blocking mode\n", sfd);
+	evutil_make_socket_nonblocking(sfd);
 }
 
 

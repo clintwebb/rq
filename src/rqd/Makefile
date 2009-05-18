@@ -1,7 +1,7 @@
 all: rqd
 
 ARGS=-g -Wall -O2
-# -fprofile-arcs -ftest-coverage
+# -fprofile-arcs -ftest-coverage 
 # -pg
 
 
@@ -30,21 +30,21 @@ OBJS=rqd.o daemon.o settings.o \
      process.o message.o send.o \
      actions.o signals.o controllers.o
 
-# DEBUG_LIBS=-lefence
-DEBUG_LIBS=
+DEBUG_LIBS=-lefence -lpthread
+#DEBUG_LIBS=
 
 LIBS=-lrisp -levent -lexpbuf -lexpbufpool -lrispbuf -lrq -levactions -lmempool -llinklist $(DEBUG_LIBS)
 
 rqd: $(OBJS)
 	gcc -o $@ $(ARGS) $(OBJS) $(LIBS) 
 
-actions.o: actions.c $(H_actions) $(H_server) $(H_stats) $(H_queue)
+actions.o: actions.c $(H_actions) $(H_controllers) $(H_server) $(H_stats) $(H_queue)
 	gcc -c -o $@ $(ARGS) actions.c 
 
 commands.o: commands.c $(H_commands) $(H_node) $(H_process)  $(H_send)
 	gcc -c -o $@ $(ARGS) commands.c
 
-controllers.o: controllers.c $(H_controllers) $(H_node) $(H_queue) $(H_send) $(H_server) $(H_system_data) $(HH_rq)
+controllers.o: controllers.c $(H_actions) $(H_controllers) $(H_node) $(H_queue) $(H_send) $(H_server) $(H_system_data) $(HH_rq)
 	gcc -c -o $@ $(ARGS) controllers.c
 
 data.o: data.c $(H_data)

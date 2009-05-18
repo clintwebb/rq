@@ -43,6 +43,7 @@ typedef struct {
 	system_data_t *sysdata;
 } queue_t;
 
+void queue_set_id(list_t *queues, const char *name, queue_id_t id);
 
 queue_t * queue_get_id(list_t *queues, queue_id_t qid);
 queue_t * queue_get_name(list_t *queues, const char *qname);

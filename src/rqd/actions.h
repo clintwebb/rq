@@ -3,12 +3,7 @@
 
 #include <evactions.h>
 
-// void ah_node_shutdown(action_t *action);
-// void ah_queue_shutdown(action_t *action);
-
 void ah_stats(action_t *action);
-
-// void ah_message(action_t *action);
 
 #endif
 

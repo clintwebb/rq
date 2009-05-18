@@ -166,8 +166,6 @@ void queue_notify(queue_t *queue, void *pserver)
 	while (node) {
 		
 		if (BIT_TEST(node->flags, FLAG_NODE_CONTROLLER)) {
-			assert(0);
-
 			sendConsume(node, queue->name, 1, QUEUE_LOW_PRIORITY);
 		}
 		
@@ -616,3 +614,30 @@ void queue_shutdown(queue_t *queue)
 	}
 }
 
+
+void queue_set_id(list_t *queues, const char *name, queue_id_t id)
+{
+	queue_t *q = NULL;
+	queue_t *tmp;
+	void *next;
+
+	assert(queues);
+	assert(name);
+	assert(id > 0);
+
+	next = ll_start(queues);
+	tmp = ll_next(queues, &next);
+	while (tmp) {
+		assert(tmp->name);
+		assert(tmp->qid > 0);
+
+		if (strcmp(tmp->name, name) == 0) {
+			q = tmp;
+			q->qid = id;
+			tmp = NULL;
+		}
+		else {
+			tmp = ll_next(queues, &next);
+		}
+	}
+}

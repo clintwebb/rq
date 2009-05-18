@@ -1,6 +1,7 @@
 ///// action.c
 
 #include "actions.h"
+#include "controllers.h"
 #include "queue.h"
 #include "send.h"
 #include "server.h"
@@ -10,12 +11,6 @@
 #include <evactions.h>
 #include <stdlib.h>
 #include <unistd.h>
-
-
-
-
-
-
 
 
 
@@ -54,7 +49,9 @@ void ah_message(action_t *action)
 {
 	assert(action);
 	assert(0);
+	action_pool_return(action);
 }
+
 
 
 

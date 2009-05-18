@@ -165,6 +165,7 @@ void sendConsume(node_t *node, char *queue, short int max, unsigned char priorit
 
 	// add the commands to the out queue.
 	addCmd(build, RQ_CMD_CLEAR);
+	addCmd(build, RQ_CMD_CONSUME);
 	addCmdShortStr(build, RQ_CMD_QUEUE, strlen(queue), queue);
 	addCmdInt(build, RQ_CMD_MAX, max);
 	addCmdShortInt(build, RQ_CMD_PRIORITY, priority);

@@ -283,6 +283,22 @@ void cmdId(void *base, risp_int_t value)
 		printf("node:%d ID (%d) (flags:%x, mask:%x)\n", node->handle, value, node->data.flags, node->data.mask);
 }
 
+void cmdQueueID(void *base, risp_int_t value)
+{
+	node_t *node= (node_t *) base;
+ 	assert(node);
+ 	assert(value >= 0 && value <= 0xffff);
+	node->data.qid = value;
+	BIT_SET(node->data.mask, DATA_MASK_QUEUEID);
+
+	assert(node->sysdata != NULL);
+	if (node->sysdata->verbose > 1)
+		printf("node:%d QUEUEID (%d)\n", node->handle, value);
+}
+
+
+
+
 void cmdTimeout(void *base, risp_int_t value)
 {
 	node_t *node= (node_t *) base;
