@@ -132,10 +132,10 @@ static void node_closed(node_t *node)
 
 	if (node->controller) {
 		assert(BIT_TEST(node->flags, FLAG_NODE_CONTROLLER));
-		assert(BIT_TEST(node->flags, FLAG_CONTROLLER_CONNECTING) == 0);
 
 		ct = node->controller;
 		assert(ct);
+		assert(BIT_TEST(ct->flags, FLAG_CONTROLLER_CONNECTING) == 0);
 
 		// we need to remove the consume on the queues.
 		queue_cancel_node(node);
@@ -145,7 +145,6 @@ static void node_closed(node_t *node)
 		node->controller = NULL;
 
 		controller_connect(ct);
-
 	}
 	else {
 		// we need to remove the consume on the queues.
