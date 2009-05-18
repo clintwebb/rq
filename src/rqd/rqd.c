@@ -6,7 +6,6 @@
 
 
 
-#include "actions.h"
 #include "commands.h"
 #include "controllers.h"
 #include "daemon.h"
@@ -19,7 +18,6 @@
 
 // includes
 #include <assert.h>
-#include <evactions.h>
 #include <event.h>
 #include <expbufpool.h>
 #include <rq.h>
@@ -148,7 +146,6 @@ int main(int argc, char **argv)
 	settings_t     *settings = NULL;
 	server_t       *server   = NULL;
 	stats_t        *stats    = NULL;
-	action_t       *action   = NULL;
 	queue_t        *q;
 	char           *str;
 	controller_t   *ct;
@@ -167,7 +164,6 @@ int main(int argc, char **argv)
 	sysdata.settings     = NULL;
 	sysdata.server       = NULL;
 	sysdata.stats        = NULL;
-	sysdata.actpool      = NULL;
 	sysdata.risp         = NULL;
 	sysdata.queues       = NULL;
 	sysdata.msgpool      = NULL;
@@ -175,6 +171,7 @@ int main(int argc, char **argv)
 	sysdata.sigint_event = NULL;
 	sysdata.nodelist     = NULL;
 	sysdata.controllers  = NULL;
+	sysdata.stats_event  = NULL;
 
 
 	// init settings
@@ -223,12 +220,6 @@ int main(int argc, char **argv)
 	sysdata.bufpool = (expbuf_pool_t *) malloc(sizeof(expbuf_pool_t));
 	expbuf_pool_init(sysdata.bufpool, 0);
 
-	// Creating our actions pool.
-	assert(sysdata.evbase != NULL);
-	if (settings->verbose) printf("Creating the Action pool.\n");
-	sysdata.actpool = (action_pool_t *) malloc(sizeof(action_pool_t));
-	action_pool_init(sysdata.actpool, sysdata.evbase, &sysdata);
-
 	// create our common buffers.
 	sysdata.in_buf = (expbuf_t *) malloc(sizeof(expbuf_t));
 	sysdata.build_buf = (expbuf_t *) malloc(sizeof(expbuf_t));
@@ -257,7 +248,6 @@ int main(int argc, char **argv)
 		}
 	}
 
-	assert(sysdata.actpool);
 	assert(sysdata.server);
 
 	// initialise clock event.  The clock event is used to keep up our node 
@@ -279,13 +269,9 @@ int main(int argc, char **argv)
 		assert(stats->logfile != NULL);
 	}
 	sysdata.stats = stats;
+	stats->sysdata = &sysdata;
+	stats_start(stats);
 
-	// setup an action to output the stats every second.
-	assert(sysdata.actpool != NULL);
-	action = action_pool_new(sysdata.actpool);
-	action_label(action, "ah_stats");
-	action_set(action, 1000, ah_stats, stats);
-	action = NULL;
 
 
 	// Initialise the risp system.
@@ -359,19 +345,6 @@ int main(int argc, char **argv)
 ///============================================================================
 /// Shutdown
 ///============================================================================
-
-	// Since the event loop has closed, there is no way that additional events
-	// can be added, so cleanup the action pool.
-	assert(sysdata.actpool != NULL);
-	printf("Actions: active=%d, inactive=%d\n", action_pool_active(sysdata.actpool), action_pool_inactive(sysdata.actpool));
-	if (action_pool_active(sysdata.actpool) > 0) {
-		printf("active action is %s.\n", action_getactivelabel(sysdata.actpool));
-	}
-	assert(action_pool_active(sysdata.actpool) == 0);
-	
-	action_pool_free(sysdata.actpool);
-	free(sysdata.actpool);
-	sysdata.actpool = NULL;
 
 	// clear the event base pointer, because no more events can be set.
 	sysdata.evbase = NULL;

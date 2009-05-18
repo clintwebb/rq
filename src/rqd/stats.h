@@ -15,11 +15,13 @@ typedef struct {
 	unsigned int re, we;
 	FILE *logfile;
 	short shutdown;
+	system_data_t *sysdata;
+	struct event *stats_event;
 } stats_t;
 
 
 void stats_init(stats_t *stats);
-void stats_display(stats_t *stats, system_data_t *sysdata);
+void stats_start(stats_t *stats);
 
 #endif
 

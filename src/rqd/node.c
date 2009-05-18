@@ -1,6 +1,5 @@
 // node.c
 
-#include "actions.h"
 #include "data.h"
 #include "node.h"
 #include "queue.h"
@@ -120,7 +119,6 @@ static void node_closed(node_t *node)
 	message_t *msg;
 	server_t *server;
 	system_data_t *sysdata;
-	action_t *action;
 	controller_t *ct;
 	
 	assert(node);
@@ -143,16 +141,11 @@ static void node_closed(node_t *node)
 		queue_cancel_node(node);
 
 		assert(ct->connect_event == NULL);
-
-		//set the action so that we can attempt to reconnect.
-		assert(node->sysdata->actpool);
-		action = action_pool_new(node->sysdata->actpool);
-		action_label(action, "ah_controller_connect-node");
-		action_set(action, 1000, ah_controller_connect, ct);
-		action = NULL;
-
 		ct->node = NULL;
 		node->controller = NULL;
+
+		controller_connect(ct);
+
 	}
 	else {
 		// we need to remove the consume on the queues.
@@ -164,13 +157,15 @@ static void node_closed(node_t *node)
 	while ((msg = ll_pop_head(&node->out_msg)) != NULL) {
 		// we have a message that we need to deal with.
 
-		// if this node was a destination for the message then we need to return a FAILURE to the source.
+		// if this node was a destination for the message then we need to return
+		// a FAILURE to the source.
 		assert(0);
 
 		// if this node was a source, we need to send a CANCEL to the destination.
 		assert(0);
 
-		// detatch message from node, and the node from the message and then set an action to deal with the message.
+		// detatch message from node, and the node from the message and then set
+		// an action to deal with the message.
 		assert(0);
 	}
 	
