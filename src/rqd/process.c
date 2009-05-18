@@ -191,17 +191,26 @@ void processCancelQueue(node_t *node)
 
 void processClosing(node_t *node)
 {
-	// if the node is a regular consumer then we cancel all the queues that do not have pending requests for this node.
-	assert(0);
+	assert(node);
+
+	// if the node is a regular consumer then we cancel all the queues that do
+	// not have pending requests for this node.
+	queue_cancel_node(node);
 
 	// if this is a regular consumer, we would close the socket if there are no replies that are ready to go down the pipe.
-	assert(0);
+	if (ll_count(&node->out_msg) > 0) {
+		assert(0);
+	}
 
 	// mark the node as closing so that as soon as all the messages have completed, the node can be shutdown.
-	assert(0);
+	assert(BIT_TEST(node->flags, FLAG_NODE_CLOSING) == 0);
+	BIT_SET(node->flags, FLAG_NODE_CLOSING);
 
 	// if this node is a controller, then we may need to do something to handle it.  Although it is likely that nothign would be done until the connection is actually lost.
-	assert(0);
+	if (BIT_TEST(node->flags, FLAG_NODE_CONTROLLER)) {
+		// what do we need to do special to handle the closing of a controller node?
+		// nothing really... that would be done when the connection is actually closed.
+	}
 }
 
 void processServerFull(node_t *node)
