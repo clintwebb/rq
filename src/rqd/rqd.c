@@ -41,17 +41,14 @@
 void usage(void) {
 	printf(PACKAGE " " VERSION "\n");
 	printf("-p <num>      TCP port to listen on (default: %d)\n", RQ_DEFAULT_PORT);
-	printf("-l <ip_addr>  interface to listen on, default is INDRR_ANY\n");
-	printf("-c <num>      max simultaneous connections, default is 1024\n");
+	printf("-i <ip_addr>  interface to listen on, default is INDRR_ANY\n");
+	printf("-C <num>      max simultaneous connections, default is 1024\n");
+	printf("-S <ip:port>  Controller to connect to. (can be used more than once)\n");
+	printf("-l <file>     Local log file\");
 	printf("\n");
-	printf("-a <ip_addr>  Controller to connect to.\n");
-	printf("-A <num>      Port to use when connecting to the other controller.\n");
-	printf("-b <ip_addr>  Backup Controller to connect to.\n");
-	printf("-B <num>      Port to use when connecting to the backup controller.\n");
-	printf("\n");
-	printf("-d            run as a daemon\n");
+	printf("-D            run as a daemon\n");
 	printf("-P <file>     save PID in <file>, only used with -d option\n");
-	printf("-u <username> assume identity of <username> (only when run as root)\n");
+	printf("-U <username> assume identity of <username> (only when run as root)\n");
 	printf("\n");
 	printf("-v            verbose (print errors/warnings while in event loop)\n");
 	printf("-h            print this help and exit\n");
@@ -69,7 +66,8 @@ void get_options(settings_t *settings, int argc, char **argv)
 	
 	// process arguments 
 	while ((c = getopt(argc, argv,
-		"hv"	/* help, verbose */
+		"h"   /* help */
+		"v"   /* verbose */
 		
 		"C:"  /* max number of connections */
 		"D:"  /* run as daemon */
@@ -79,7 +77,7 @@ void get_options(settings_t *settings, int argc, char **argv)
 		
 		"i:"  /* interfaces to bind to */
 		"p:"  /* port to listen on. */
-		"l:"  /*  logfile */
+		"l:"  /* logfile. */
 	)) != -1) {
 		switch (c) {
 
