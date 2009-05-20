@@ -58,7 +58,7 @@ void      queue_shutdown(queue_t *queue);
 
 
 void      queue_deliver(queue_t *queue);
-void      queue_notify(queue_t *queue, void *server);
+// void      queue_notify(queue_t *queue, void *server);
 void      queue_msg_done(queue_t *queue, node_t *node);
 
 #endif

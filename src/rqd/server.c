@@ -229,12 +229,11 @@ void server_event_handler(int hid, short flags, void *data)
 		return;
 	}
 
-	if (server->sysdata->verbose) printf("New Connection [%d]\n", sfd);
+	if (server->sysdata->verbose>1) printf("New Connection [%d]\n", sfd);
 	node = node_create(server->sysdata, sfd);
 	assert(node);
 
 	// mark socket as non-blocking
-	if (server->sysdata->verbose > 1) printf(" -- node(%d) setting non-blocking mode\n", sfd);
 	evutil_make_socket_nonblocking(sfd);
 }
 

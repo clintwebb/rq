@@ -20,6 +20,7 @@ void stats_init(stats_t *stats)
 	stats->broadcasts = 0;
 	stats->re = 0;
 	stats->we = 0;
+	stats->te = 0;
 
 	stats->logfile = NULL;
 	stats->shutdown = 0;
@@ -77,7 +78,7 @@ void stats_handler(int fd, short int flags, void *arg)
 	if (stats->in_bytes || stats->out_bytes || stats->requests || stats->replies || stats->broadcasts || stats->re || stats->we) {
 
 		if (stats->sysdata->verbose)
-			printf("Bytes[%u/%u], Clients[%u], Requests[%u], Replies[%u], Broadcasts[%u], Queues[%u], Msgs[%d/%d], MsgPool[%u/%u], Events[%u/%u]\n",
+			printf("Bytes[%u/%u], Clients[%u], Requests[%u], Replies[%u], Broadcasts[%u], Queues[%u], Msgs[%d/%d], MsgPool[%u/%u], Events[%u/%u/%u]\n",
 				stats->in_bytes,
 				stats->out_bytes,
 				clients,
@@ -87,7 +88,7 @@ void stats_handler(int fd, short int flags, void *arg)
 				queues,
 				msg_pending, msg_proc,
 				mempool_active_count(stats->sysdata->msgpool), mempool_inactive_count(stats->sysdata->msgpool),
-				stats->re, stats->we);
+				stats->re, stats->we, stats->te);
 		
 		stats->in_bytes = 0;
 		stats->out_bytes = 0;
@@ -96,6 +97,7 @@ void stats_handler(int fd, short int flags, void *arg)
 		stats->broadcasts = 0;
 		stats->re = 0;
 		stats->we = 0;
+		stats->te = 0;
 	}
 
 	// if we are not shutting down, then schedule the stats event again.

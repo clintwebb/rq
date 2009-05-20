@@ -12,7 +12,7 @@ typedef struct {
 	unsigned int requests;
 	unsigned int replies;
 	unsigned int broadcasts;
-	unsigned int re, we;
+	unsigned int re, we, te;
 	FILE *logfile;
 	short shutdown;
 	system_data_t *sysdata;

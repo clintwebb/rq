@@ -9,6 +9,7 @@
 
 #include "controllers.h"
 #include "data.h"
+#include "message.h"
 #include "system_data.h"
 
 
@@ -43,6 +44,8 @@ node_t * node_create(system_data_t *sysdata, int handle);
 void node_write_now(node_t *node, int length, char *data);
 void node_read_handler(int hid, short flags, void *data);
 void node_write_handler(int hid, short flags, void *data);
+
+message_t * node_findoutmsg(node_t *node, msg_id_t msgid);
 
 
 #endif

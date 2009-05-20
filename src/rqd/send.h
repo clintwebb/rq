@@ -12,9 +12,10 @@
 
 void sendConsumeReply(node_t *node, char *queue, int qid);
 void sendMessage(node_t *node, message_t *msg);
-void sendUndelivered(node_t *node, message_t *msg);
+void sendDelivered(node_t *node, message_id_t msgid);
+void sendUndelivered(node_t *node, message_id_t msgid);
 void sendClosing(node_t *node);
-void sendConsume(node_t *node, char *queue, short int max, unsigned char priority);
+void sendConsume(node_t *node, char *queue, short int max, unsigned char priority, short int exclusive);
 
 void sendPing(node_t *node);
 void sendPong(node_t *node);

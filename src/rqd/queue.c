@@ -146,29 +146,34 @@ void queue_addmsg(queue_t *queue, message_t *msg)
 
 
 // this function will look at the flags for the queue, and if we need to 
-void queue_notify(queue_t *queue, void *pserver)
+static void queue_notify(queue_t *queue)
 {
-	server_t *server = (server_t *) pserver;
-	
 	node_t *node;
 	void *next;
+	short int exclusive;
 	
 	assert(queue->qid > 0);
 	assert(queue->name != NULL);
-	assert(server->sysdata);
-	assert(server->sysdata->nodelist);
+	assert(queue->sysdata);
+	assert(queue->sysdata->nodelist);
 
 	// now that we have our server object, we can go thru the list of nodes.  If
 	// any of them are controllers, then we need to send a consume request.
-	next = ll_start(server->sysdata->nodelist);
-	node = ll_next(server->sysdata->nodelist, &next);
+	next = ll_start(queue->sysdata->nodelist);
+	node = ll_next(queue->sysdata->nodelist, &next);
 	while (node) {
 		
 		if (BIT_TEST(node->flags, FLAG_NODE_CONTROLLER)) {
-			sendConsume(node, queue->name, 1, QUEUE_LOW_PRIORITY);
+
+			exclusive = 0;
+			if (BIT_TEST(queue->flags, QUEUE_FLAG_EXCLUSIVE)) {
+				exclusive = 1;
+			}
+		
+			sendConsume(node, queue->name, 1, QUEUE_LOW_PRIORITY, exclusive);
 		}
 		
-		node = ll_next(server->sysdata->nodelist, &next);
+		node = ll_next(queue->sysdata->nodelist, &next);
 	}
 }
 
@@ -349,10 +354,6 @@ queue_t * queue_create(system_data_t *sysdata, char *qname)
 	// add the queue to the queue list.
 	ll_push_head(sysdata->queues, q);
 
-	// notify other nodes (controllers) that we are consuming a queue.
-	assert(sysdata->server);
-	queue_notify(q, sysdata->server);
-
 	return (q);
 }
 
@@ -408,6 +409,10 @@ int queue_add_node(queue_t *queue, node_t *node, int max, int priority, unsigned
 
 		// add the node to the appropriate list.
 		ll_push_head(&queue->nodes_ready, nq);
+
+		// notify other nodes (controllers) that we are consuming a queue.
+		assert(queue->sysdata);
+		queue_notify(queue);
 
 		if (node->sysdata->verbose)
 			printf("Consuming queue: qid=%d\n", queue->qid);

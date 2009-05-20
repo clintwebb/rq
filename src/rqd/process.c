@@ -29,7 +29,7 @@ void processRequest(node_t *node)
 	// This function should not be called for a Broadcast message.
 	assert(BIT_TEST(node->data.flags, DATA_FLAG_BROADCAST) == 0);
 
-	// make sure we have the required data.
+	// make sure we have the required data. At least payload, and a queueid or queue.
 	if (BIT_TEST(node->data.mask, DATA_MASK_PAYLOAD) && (BIT_TEST(node->data.mask, DATA_MASK_QUEUE) || BIT_TEST(node->data.mask, DATA_MASK_QUEUEID))) {
 
 		// create the message object to hold the data.
@@ -41,16 +41,20 @@ void processRequest(node_t *node)
 		message_init(msg, node->sysdata);
 
 		// assign the message payload.
-		// TODO: Need to improve this so that we can detach a buffer and assign it, without having to do a copy.
+		// TODO: Need to improve this so that we can detach a buffer and assign
+		//       it, without having to do a copy.
 		msg->data = expbuf_pool_new(node->sysdata->bufpool, node->data.payload.length);
-		assert(msg->data);
 		expbuf_set(msg->data, node->data.payload.data, node->data.payload.length);
 		
-		// if message is NOREPLY, then we dont need
+		// if message is NOREPLY, then we dont need some bits.  However, we will need to send a DELIVERED.
 		if (BIT_TEST(node->data.flags, DATA_FLAG_NOREPLY)) {
 			BIT_SET(msg->flags, FLAG_MSG_NOREPLY);
 			assert(msg->source_node == NULL);
 			assert(msg->source_id == 0);
+
+			if (BIT_TEST(node->data.mask, DATA_MASK_ID)) {
+				sendDelivered(node, node->data.id);
+			}
 		}
 		else {
 			assert(BIT_TEST(msg->flags, FLAG_MSG_NOREPLY) == 0);
@@ -134,7 +138,7 @@ void processConsume(node_t *node)
 	// make sure that we have the minimum information that we need.
 	if (BIT_TEST(node->data.mask, DATA_MASK_QUEUE)) {
 
-		if (node->sysdata->verbose)
+		if (node->sysdata->verbose > 1)
 			printf("Processing QUEUE request from node:%d\n", node->handle);
 
 		assert(BIT_TEST(node->data.mask, DATA_MASK_QUEUE));
@@ -147,7 +151,8 @@ void processConsume(node_t *node)
 		
 		if (q == NULL) {
 			// we didn't find the queue...
-			printf("Didn't find queue '%s', creating new entry.\n", expbuf_string(&node->data.queue));
+			if (node->sysdata->verbose > 1)
+				printf("Didn't find queue '%s', creating new entry.\n", expbuf_string(&node->data.queue));
 			q = queue_create(node->sysdata, expbuf_string(&node->data.queue));
 		}
 	
@@ -169,7 +174,7 @@ void processConsume(node_t *node)
 			
 		if (BIT_TEST(node->data.flags, DATA_FLAG_EXCLUSIVE))
 			BIT_SET(flags, QUEUE_FLAG_EXCLUSIVE);
-
+		
 		if (queue_add_node(q, node, max, priority, flags) > 0) {
 			// send reply back to the node.
 			sendConsumeReply(node, q->name, q->qid);
@@ -291,9 +296,8 @@ void processBroadcast(node_t *node)
 void processDelivered(node_t *node)
 {
 	msg_id_t msgid;
-	message_t *tmp, *msg;
+	message_t *msg;
 	queue_t *q;
-	void *next;
 	
 	assert(node != NULL);
 
@@ -305,20 +309,7 @@ void processDelivered(node_t *node)
 	if (node->sysdata->verbose > 1) printf("processDelivered.  Node:%d, msg_id:%d\n", node->handle, msgid);
 
 	// find message in node->out_msg
-	msg = NULL;
-	next = ll_start(&node->out_msg);
-	tmp = ll_next(&node->out_msg, &next);
-	while (tmp) {
-		assert(tmp->id > 0);
-		if (tmp->id == msgid) {
-			msg = tmp;
-			tmp = NULL;
-		}
-		else {
-			tmp = ll_next(&node->out_msg, &next);
-		}
-	}
-
+	msg = node_findoutmsg(node, msgid);
 	if (msg == NULL) {
 		// didn't find the message that is being marked as delivered.
 		assert(0);

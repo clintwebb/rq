@@ -300,9 +300,10 @@ void node_read_handler(int hid, short flags, void *data)
 	
 	stats = node->sysdata->stats;
 	assert(stats);
-	stats->re ++;
 
 	if (flags & EV_TIMEOUT) {
+		stats->te ++;
+
 		// idle
 		assert(node->idle >= 0);
 		node->idle ++;
@@ -315,6 +316,8 @@ void node_read_handler(int hid, short flags, void *data)
 	}
 	else {
 		assert(flags & EV_READ);
+
+		stats->re ++;
 
 		// if we have data, then obviously we are not idle...
 		assert(node->idle >= 0);
@@ -380,7 +383,7 @@ void node_read_handler(int hid, short flags, void *data)
 				empty = 1;
 				
 				if (res == 0) {
-					if (node->sysdata->verbose > 1)
+					if (node->sysdata->verbose > 2)
 						printf("Node[%d] closed while reading.\n", node->handle);
 					assert(node->out);
 					node->handle = INVALID_HANDLE;
@@ -390,7 +393,7 @@ void node_read_handler(int hid, short flags, void *data)
 				else {
 					assert(res == -1);
 					if (errno != EAGAIN && errno != EWOULDBLOCK) {
-						if (node->sysdata->verbose > 1)
+						if (node->sysdata->verbose > 2)
 							printf("Node[%d] closed while reading- because of error: %d\n", node->handle, errno);
 						close(node->handle);
 						node->handle = INVALID_HANDLE;
@@ -557,3 +560,30 @@ node_t * node_create(system_data_t *sysdata, int handle)
 }
 
 
+//-----------------------------------------------------------------------------
+// Find a message in the out-queue for the node.  Return the message if it was
+// found (which it should have, right?)
+message_t * node_findoutmsg(node_t *node, msg_id_t msgid)
+{
+	message_t *msg, *tmp;
+	void *next;
+
+	assert(node);
+	assert(msgid > 0);
+	
+	msg = NULL;
+	next = ll_start(&node->out_msg);
+	tmp = ll_next(&node->out_msg, &next);
+	while (tmp) {
+		assert(tmp->id > 0);
+		if (tmp->id == msgid) {
+			msg = tmp;
+			tmp = NULL;
+		}
+		else {
+			tmp = ll_next(&node->out_msg, &next);
+		}
+	}
+
+	return(msg);
+}

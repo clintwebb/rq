@@ -94,13 +94,43 @@ void sendMessage(node_t *node, message_t *msg)
 }
 
 
+//-----------------------------------------------------------------------------
 
-void sendUndelivered(node_t *node, message_t *msg)
+void sendDelivered(node_t *node, message_id_t msgid)
 {
 	expbuf_t *build;
 	
-	assert(node != NULL);
-	assert(msg != NULL);
+	assert(node);
+	assert(msgid > 0);
+
+	assert(node->sysdata);
+	assert(node->sysdata->build_buf);
+	build = node->sysdata->build_buf;
+	assert(build->length == 0);
+
+	// add the commands to the out queue.
+	addCmd(build, RQ_CMD_CLEAR);
+	addCmdLargeInt(build, RQ_CMD_ID, (short int) msgid);
+	addCmd(build, RQ_CMD_DELIVERED);
+	addCmd(build, RQ_CMD_EXECUTE);
+
+	node_write_now(node, build->length, build->data);
+	expbuf_clear(build);
+
+	if (node->sysdata->verbose > 1)
+		printf("sendDelivered.  node=%d, msgid=%d\n",
+			node->handle, msgid);
+}
+
+
+//-----------------------------------------------------------------------------
+// Tell a node that a message was not delivered.
+void sendUndelivered(node_t *node, message_id_t msgid)
+{
+	expbuf_t *build;
+	
+	assert(node);
+	assert(msgid > 0);
 
 	assert(node->sysdata);
 	assert(node->sysdata->build_buf);
@@ -110,15 +140,20 @@ void sendUndelivered(node_t *node, message_t *msg)
 	// add the commands to the out queue.
 	addCmd(build, RQ_CMD_CLEAR);
 	addCmd(build, RQ_CMD_UNDELIVERED);
-	
-	assert(0);
-// 	addCmdInt(build, RQ_CMD_QUEUEID, qid);
-// 	addCmdShortStr(build, RQ_CMD_QUEUE, strlen(queue), queue);
+	addCmdLargeInt(build, RQ_CMD_ID, (short int) msgid);
 	addCmd(build, RQ_CMD_EXECUTE);
 
 	node_write_now(node, build->length, build->data);
 	expbuf_clear(build);
+	
+	if (node->sysdata->verbose > 1)
+		printf("sendUndelivered.  node=%d, msgid=%d\n",
+			node->handle, msgid);
 }
+
+
+
+
 
 
 //-----------------------------------------------------------------------------
@@ -148,7 +183,7 @@ void sendClosing(node_t *node)
 //-----------------------------------------------------------------------------
 // The node is a controller, and we are making a consume request for a new
 // queue that another node is consuming.
-void sendConsume(node_t *node, char *queue, short int max, unsigned char priority)
+void sendConsume(node_t *node, char *queue, short int max, unsigned char priority, short int exclusive)
 {
 	expbuf_t *build;
 	
@@ -169,6 +204,9 @@ void sendConsume(node_t *node, char *queue, short int max, unsigned char priorit
 	addCmdShortStr(build, RQ_CMD_QUEUE, strlen(queue), queue);
 	addCmdInt(build, RQ_CMD_MAX, max);
 	addCmdShortInt(build, RQ_CMD_PRIORITY, priority);
+	if (exclusive != 0) {
+		addCmd(build, RQ_CMD_EXCLUSIVE);
+	}
 	addCmd(build, RQ_CMD_EXECUTE);
 
 	node_write_now(node, build->length, build->data);
