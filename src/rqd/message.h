@@ -15,7 +15,7 @@
 
 typedef int message_id_t;
 
-typedef struct __message_t {
+typedef struct {
 	message_id_t   id;						// ID given to the delivery node.
 	unsigned int   flags;					// flags that indicate various modes and settings.
 	int            timeout;				// timeout value to be counted down.
