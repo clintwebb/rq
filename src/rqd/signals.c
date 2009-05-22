@@ -106,6 +106,9 @@ void sigint_handler(evutil_socket_t fd, short what, void *arg)
 	stats = sysdata->stats;
 	assert(stats->shutdown == 0);
 	stats->shutdown ++;
+
+	// Tell the logging system not to use events anymore.
+	logging_direct(sysdata->logging);
 }
 
 

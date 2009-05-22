@@ -22,7 +22,6 @@ void stats_init(stats_t *stats)
 	stats->we = 0;
 	stats->te = 0;
 
-	stats->logfile = NULL;
 	stats->shutdown = 0;
 
 	stats->sysdata = NULL;
@@ -33,7 +32,7 @@ void stats_init(stats_t *stats)
 
 
 
-void stats_handler(int fd, short int flags, void *arg)
+static void stats_handler(int fd, short int flags, void *arg)
 {
 	stats_t *stats;
 	int clients;

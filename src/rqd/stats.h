@@ -13,7 +13,6 @@ typedef struct {
 	unsigned int replies;
 	unsigned int broadcasts;
 	unsigned int re, we, te;
-	FILE *logfile;
 	short shutdown;
 	system_data_t *sysdata;
 	struct event *stats_event;

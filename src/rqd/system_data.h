@@ -1,6 +1,8 @@
 #ifndef __SYSTEM_DATA_H
 #define __SYSTEM_DATA_H
 
+#include "logging.h"
+
 #include <event.h>
 #include <expbufpool.h>
 #include <linklist.h>
@@ -27,6 +29,8 @@ typedef struct {
 	list_t *queues;
 	list_t *nodelist;
 	list_t *controllers;
+
+	logging_t *logging;
 } system_data_t;
 
 

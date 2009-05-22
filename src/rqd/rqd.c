@@ -44,7 +44,7 @@ void usage(void) {
 	printf("-i <ip_addr>  interface to listen on, default is INDRR_ANY\n");
 	printf("-C <num>      max simultaneous connections, default is 1024\n");
 	printf("-S <ip:port>  Controller to connect to. (can be used more than once)\n");
-	printf("-l <file>     Local log file\");
+	printf("-l <file>     Local log file\n");
 	printf("\n");
 	printf("-D            run as a daemon\n");
 	printf("-P <file>     save PID in <file>, only used with -d option\n");
@@ -86,6 +86,7 @@ void get_options(settings_t *settings, int argc, char **argv)
 			case 'h':
 				usage();
 				exit(EXIT_SUCCESS);
+				break;
 			case 'v':
 				settings->verbose++;
 				break;
@@ -170,6 +171,7 @@ int main(int argc, char **argv)
 	sysdata.nodelist     = NULL;
 	sysdata.controllers  = NULL;
 	sysdata.stats_event  = NULL;
+	sysdata.logging      = NULL;
 
 
 	// init settings
@@ -182,10 +184,7 @@ int main(int argc, char **argv)
 	get_options(settings, argc, argv);
 	sysdata.verbose = settings->verbose;
 
-	if (settings->verbose) printf("Finished processing command-line args\n");
-
 	// If needed, increase rlimits to allow as many connections as needed.
-	if (settings->verbose) printf("Settings Max connections: %d\n", settings->maxconns);
 	assert(settings->maxconns > 0);
  	rq_set_maxconns(settings->maxconns);
 
@@ -193,7 +192,6 @@ int main(int argc, char **argv)
 	// work if we are running as root, and is really only needed when running as 
 	// a daemon.
 	if (settings->daemonize != false) {
-		if (settings->verbose) printf("Dropping privs and changing username: '%s'\n", settings->username);
 		if (rq_daemon(settings->username, settings->pid_file, settings->verbose) != 0) {
 			usage();
 			exit(EXIT_FAILURE);
@@ -201,9 +199,13 @@ int main(int argc, char **argv)
 	}
 
 	// initialize main thread libevent instance
-	if (settings->verbose) printf("Initialising the event system.\n");
 	sysdata.evbase = event_init();
 
+	// setup the logging system.
+	sysdata.logging = (logging_t *) malloc(sizeof(logging_t));
+	logging_init(sysdata.logging, sysdata.evbase, settings->logfile, sysdata.verbose);
+
+	logger(sysdata.logging, 1, "System starting up");
 
 	// handle SIGINT
 	assert(sysdata.evbase);
@@ -214,7 +216,7 @@ int main(int argc, char **argv)
 
 
 	// Creating our buffer pool.
-	if (settings->verbose) printf("Creating the Buffer pool.\n");
+	logger(sysdata.logging, 2, "Creating the Buffer pool.");
 	sysdata.bufpool = (expbuf_pool_t *) malloc(sizeof(expbuf_pool_t));
 	expbuf_pool_init(sysdata.bufpool, 0);
 
@@ -225,7 +227,7 @@ int main(int argc, char **argv)
 	expbuf_init(sysdata.build_buf, 0);
 
 	// create and init the 'server' structure.
-	if (settings->verbose) printf("Starting server listener on port %d.\n", settings->port);
+	logger(sysdata.logging, 2, "Starting server listener on port %d.", settings->port);
 	server = (server_t *) malloc(sizeof(server_t));
 	assert(server != NULL);
 	server_init(server, &sysdata);
@@ -240,6 +242,7 @@ int main(int argc, char **argv)
 		server_listen(server, settings->port, NULL);
 	}
 	else {
+		assert(0);
 		for (i=0; i<settings->interfaces; i++) {
 			assert(settings->interface[i] != NULL);
 			server_listen(server, settings->port, settings->interface[i]);
@@ -255,17 +258,8 @@ int main(int argc, char **argv)
 	// perform certain things spread over time.   Such as indexing the 
 	// 'complete' paths that we have, and ensuring that the 'chunks' parts are 
 	// valid.
-	if (settings->verbose) printf("Setting up Stats action.\n");
-
 	stats = (stats_t *) malloc(sizeof(stats_t));
 	stats_init(stats);
-	if (settings->logfile != NULL) {
-		/// TODO: This will do for now, but we really need a system that will log
-		///       files until they are a certain size, and then start a new one...
-		///       Or maybe a new log every day... something better than this.
-		stats->logfile = fopen(settings->logfile, "a");
-		assert(stats->logfile != NULL);
-	}
 	sysdata.stats = stats;
 	stats->sysdata = &sysdata;
 	stats_start(stats);
@@ -323,7 +317,7 @@ int main(int argc, char **argv)
 		controller_init(ct, str);
 		ct->sysdata = &sysdata;
 
-		if (settings->verbose>1) printf("Connecting to controller: %s.\n", str);
+		logger(sysdata.logging, 1, "Connecting to controller: %s.", str);
 		controller_connect(ct);
 		ll_push_tail(sysdata.controllers, ct);
 		ct = NULL;
@@ -334,10 +328,10 @@ int main(int argc, char **argv)
 ///============================================================================
 
 	// enter the event loop.
-	if (settings->verbose) printf("Starting Event Loop\n\n");
+	logger(sysdata.logging, 1, "Starting Event Loop");
 	assert(sysdata.evbase);
 	event_base_loop(sysdata.evbase, 0);
-	if (settings->verbose) printf("Shutdown preparations complete.  Shutting down now.\n");
+	logger(sysdata.logging, 1, "Shutdown preparations complete.  Shutting down now.");
 
 
 ///============================================================================
@@ -372,7 +366,6 @@ int main(int argc, char **argv)
 	// nodelist should already be empty, otherwise how did we break out of the loop?
 	assert(sysdata.nodelist);
 	assert(ll_count(sysdata.nodelist) == 0);
-	printf("nodelist\n");
 	ll_free(sysdata.nodelist);
 	free(sysdata.nodelist);
 	sysdata.nodelist = NULL;
@@ -390,19 +383,15 @@ int main(int argc, char **argv)
 	sysdata.in_buf = NULL;
 	sysdata.build_buf = NULL;
 
-	if (sysdata.verbose) printf("\n\nExiting.\n");
+	logger(sysdata.logging, 1, "Exiting.\n");
     
 	// remove the PID file if we're a daemon
 	if (settings->daemonize && settings->pid_file != NULL) {
-		if (settings->verbose) printf("Removing pid file: %s\n", settings->pid_file);
 		unlink(settings->pid_file);
 	}
 
 	// cleanup stats objects.
 	assert(stats != NULL);
-	if (stats->logfile != NULL) {
-		fclose(stats->logfile);
-	}
 	free(stats);
 	stats = NULL;
 	sysdata.stats = NULL;
@@ -420,13 +409,16 @@ int main(int argc, char **argv)
 		controller_free(ct);
 		free(ct);
 	}
-	printf("controllers\n");
 	ll_free(sysdata.controllers);
 	free(sysdata.controllers);
 	sysdata.controllers = NULL;
 	
-
-
+	logger(sysdata.logging, 1, "Shutdown complete.\n");
+	
+	assert(sysdata.logging);
+	logging_free(sysdata.logging);
+	free(sysdata.logging);
+	sysdata.logging = NULL;
 
 	// cleanup the settings object.
 	assert(settings != NULL);
@@ -435,8 +427,6 @@ int main(int argc, char **argv)
 	settings = NULL;
 	sysdata.settings = NULL;
 	
-	if (sysdata.verbose) printf("\nExited.\n");
-
 	// good-bye.
 	return 0;
 }

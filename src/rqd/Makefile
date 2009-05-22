@@ -10,7 +10,8 @@ HH_linklist=/usr/include/linklist.h
 
 H_controllers=controllers.h $(HH_linklist)
 H_settings=settings.h $(HH_linklist)
-H_system_data=system_data.h $(HH_rq)
+H_logging=logging.h
+H_system_data=system_data.h $(HH_rq) $(H_logging)
 H_stats=stats.h $(H_system_data)
 H_data=data.h
 H_message=message.h $(H_system_data)
@@ -27,7 +28,8 @@ OBJS=rqd.o daemon.o settings.o \
      stats.o data.o server.o   \
      node.o queue.o commands.o \
      process.o message.o send.o \
-     signals.o controllers.o
+     signals.o controllers.o \
+     logging.o
 
 DEBUG_LIBS=-lefence -lpthread
 #DEBUG_LIBS=
@@ -51,6 +53,9 @@ data.o: data.c $(H_data)
 
 daemon.o: daemon.c daemon.h
 	gcc -c -o $@ $(ARGS) daemon.c
+
+logging.o: logging.c $(H_logging)
+	gcc -c -o $@ $(ARGS) logging.c
 
 message.o: message.c $(H_message) $(H_queue)
 	gcc -c -o $@ $(ARGS) message.c
