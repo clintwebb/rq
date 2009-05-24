@@ -13,7 +13,8 @@ rq-log: rq-log.c /usr/include/rq-log.h /usr/lib/librq-log.so.1.0.1
 log-test: log-test.c /usr/include/rq-log.h rq-log /usr/include/rq.h
 	gcc -o $@ log-test.c -lrq-log -lrispbuf -lrisp -lexpbuf -lrq -llinklist -levent $(ARGS)
 
-
+install: rq-log
+	@cp rq-log /usr/bin
 
 clean:
 	@-rm rq-log
