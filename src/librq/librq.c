@@ -430,13 +430,11 @@ static void rq_process_read(rq_conn_t *conn)
 			empty = 1;
 			
 			if (res == 0) {
-				printf("Node[%d] closed while reading.\n", conn->handle);
 				rq_conn_closed(conn);
 			}
 			else {
 				assert(res == -1);
 				if (errno != EAGAIN && errno != EWOULDBLOCK) {
-					printf("Node[%d] closed while reading- because of error: %d\n", conn->handle, errno);
 					close(conn->handle);
 					rq_conn_closed(conn);
 				}
@@ -538,8 +536,6 @@ static void rq_send_consume(rq_conn_t *conn, rq_queue_t *queue)
 	assert(queue->queue);
 	assert(queue->max >= 0);
 
-	printf("Sending queue request for '%s' to %d\n", queue->queue, conn->handle);
-
 	// send consume request to controller.
 	addCmd(&conn->build, RQ_CMD_CLEAR);
 	addCmd(&conn->build, RQ_CMD_CONSUME);
@@ -589,8 +585,6 @@ static void rq_connect_handler(int fd, short int flags, void *arg)
 
 	assert(flags & EV_WRITE);
 
-	printf("connected.\n");
-		
 	assert(conn->status == connecting);
 	conn->status = active;
 
@@ -699,8 +693,6 @@ static void rq_connect(rq_t *rq)
 						conn->handle = sock;
 						conn->status = connecting;
 
-						printf("connect initiated.\n");
-
 						// setup the event handler.
 						assert(rq->evbase);
 						assert(conn->handle != INVALID_HANDLE && conn->handle > 0);
@@ -711,7 +703,6 @@ static void rq_connect(rq_t *rq)
 						event_add(conn->read_event, NULL);
 					}
 					else {
-						printf("-- connect failed. result=%d, errno=%d\n", result, errno);
 						close(sock);
 						sock = 0;
 						assert(result == -1);
@@ -785,7 +776,6 @@ void rq_addcontroller(rq_t *rq, char *host, int port)
 	// if this is the only controller we have so far, then we need to attempt the
 	// connect (non-blocking)
 	if (ll_count(&rq->connlist) == 1) {
-		printf("calling rq_connect()\n");
 		rq_connect(rq);
 	}
 }
@@ -1095,7 +1085,7 @@ static void cmdExecute(void *ptr)
 	else if (BIT_TEST(conn->data.mask, RQ_DATA_MASK_QUEUEID))
 		storeQueueID(conn, expbuf_string(&conn->data.queue), conn->data.qid);
 	else {
-		printf("Unexpected command - (flags:%x, mask:%x)\n", conn->data.flags, conn->data.mask);
+		fprintf(stderr, "Unexpected command - (flags:%x, mask:%x)\n", conn->data.flags, conn->data.mask);
 		assert(0);
 	}
 }
@@ -1386,7 +1376,7 @@ static void cmdInvalid(void *ptr, void *data, risp_length_t len)
 	assert(len > 0);
 	
 	cast = (unsigned char *) data;
-	printf("Received invalid (%d)): [%d, %d, %d]\n", len, cast[0], cast[1], cast[2]);
+	fprintf(stderr, "Received invalid (%d)): [%d, %d, %d]\n", len, cast[0], cast[1], cast[2]);
 	assert(0);
 }
 
