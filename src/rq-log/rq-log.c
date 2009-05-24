@@ -11,6 +11,7 @@
 #include <assert.h>
 #include <event.h>
 #include <expbuf.h>
+#include <linklist.h>
 #include <risp.h>
 #include <rispbuf.h>
 #include <rq.h>
@@ -33,7 +34,6 @@ typedef struct {
 	bool daemonize;
 	char *username;
 	char *pid_file;
-	char *interface;
 
 	// connections to the controllers.
 	char *primary;
@@ -342,6 +342,7 @@ void process_args(settings_t *settings, int argc, char **argv)
 	
 	while ((c = getopt(argc, argv, "p:k:c:hvd:u:P:l:s:a:A:b:B:")) != -1) {
 		switch (c) {
+			
 			case 'p':
 				settings->path = optarg;
 				assert(settings->path != NULL);
@@ -406,12 +407,6 @@ void process_args(settings_t *settings, int argc, char **argv)
 				settings->pid_file = optarg;
 				assert(settings->pid_file != NULL);
 				assert(settings->pid_file[0] != '\0');
-				break;
-			case 'l':
-				assert(settings->interface == NULL);
-				settings->interface = strdup(optarg);
-				assert(settings->interface != NULL);
-				assert(settings->interface[0] != '\0');
 				break;
 				
 			default:
