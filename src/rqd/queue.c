@@ -1,5 +1,6 @@
 
 
+#include "logging.h"
 #include "queue.h"
 #include "send.h"
 #include "server.h"
@@ -207,8 +208,7 @@ void queue_cancel_node(node_t *node)
 
 			assert(nq->node);
 			if (nq->node == node) {
-				if (node->sysdata->verbose)
-					printf("queue %d:'%s' removing node:%d from busy list\n", queue->qid, queue->name, node->handle);
+				logger(node->sysdata->logging, 2, "queue %d:'%s' removing node:%d from busy list", queue->qid, queue->name, node->handle);
 
 				ll_remove(&queue->nodes_busy, nq, next_node);
 
@@ -228,8 +228,9 @@ void queue_cancel_node(node_t *node)
 
 			assert(nq->node);
 			if (nq->node == node) {
-				if (node->sysdata->verbose)
-					printf("queue %d:'%s' removing node:%d from ready list\n", queue->qid, queue->name, node->handle);
+				logger(node->sysdata->logging, 2,
+					"queue %d:'%s' removing node:%d from ready list",
+					queue->qid, queue->name, node->handle);
 
 				ll_remove(&queue->nodes_ready, nq, next_node);
 				
@@ -270,8 +271,9 @@ void queue_cancel_node(node_t *node)
 						assert(0);
 					}
 
-					if (node->sysdata->verbose)
-						printf("Promoting waiting node:%d to EXCLUSIVE queue '%s'.\n", nq->node->handle, queue->name);
+					logger(node->sysdata->logging, 2,
+						"Promoting waiting node:%d to EXCLUSIVE queue '%s'.",
+						nq->node->handle, queue->name);
 				}
 			}
 		}
@@ -284,8 +286,9 @@ void queue_cancel_node(node_t *node)
 	
 				assert(nq->node);
 				if (nq->node == node) {
-					if (node->sysdata->verbose)
-						printf("queue %d:'%s' removing node:%d from waitinglist\n", queue->qid, queue->name, node->handle);
+					logger(node->sysdata->logging, 2,
+						"queue %d:'%s' removing node:%d from waitinglist",
+						queue->qid, queue->name, node->handle);
 	
 					ll_remove(&queue->nodes_waiting, nq, next_node);
 						
@@ -389,8 +392,7 @@ int queue_add_node(queue_t *queue, node_t *node, int max, int priority, unsigned
 
 		ll_push_head(&queue->nodes_waiting, nq);
 
-		if (node->sysdata->verbose > 1)
-			printf("processConsume - Defered, queue already consumed exclusively.\n");
+		logger(node->sysdata->logging, 2, "processConsume - Defered, queue already consumed exclusively.");
 
 		return (0);
 	}
@@ -403,8 +405,9 @@ int queue_add_node(queue_t *queue, node_t *node, int max, int priority, unsigned
 			assert(ll_count(&queue->nodes_ready) == 0);
 			assert(ll_count(&queue->nodes_busy) == 0);
 			BIT_SET(queue->flags, QUEUE_FLAG_EXCLUSIVE);
-			if (node->sysdata->verbose)
-				printf("Consuming Queue '%s' in EXCLUSIVE mode.\n", expbuf_string(&node->data.queue));
+			logger(node->sysdata->logging, 2, 
+				"Consuming Queue '%s' in EXCLUSIVE mode.",
+				expbuf_string(&node->data.queue));
 		}
 
 		// add the node to the appropriate list.
@@ -414,8 +417,7 @@ int queue_add_node(queue_t *queue, node_t *node, int max, int priority, unsigned
 		assert(queue->sysdata);
 		queue_notify(queue);
 
-		if (node->sysdata->verbose)
-			printf("Consuming queue: qid=%d\n", queue->qid);
+		logger(node->sysdata->logging, 2, "Consuming queue: qid=%d", queue->qid);
 
 		return(1);	
 	}
@@ -444,18 +446,13 @@ void queue_deliver(queue_t *queue)
 	// when this function is fired, there should be at least one message in the
 	// queue to process.
 	assert(ll_count(&queue->msg_pending) > 0);
-
-// 	printf("queue_deliver. q:%d, pending:%d\n", queue->qid, ll_count(&queue->msg_pending));
-
 	msg = ll_pop_head(&queue->msg_pending);
 	if (msg) {
 	
-// 		printf("queue_deliver. q:%d, pending:%d, msgid:%d\n", queue->qid, ll_count(&queue->msg_pending), msg->id);
-
 		// check the message to see if it is broadcast.
 		if (BIT_TEST(msg->flags, FLAG_MSG_BROADCAST)) {
 	
-			if (sysdata->verbose > 1) printf("queue_deliver: delivering broadcast message\n");
+			logger(sysdata->logging, 2, "queue_deliver: delivering broadcast message");
 	
 			// This is a broadcast message.
 			assert(BIT_TEST(msg->flags, FLAG_MSG_NOREPLY));
@@ -470,7 +467,7 @@ void queue_deliver(queue_t *queue)
 				nq = ll_next(&queue->nodes_ready, &next);
 				while (nq) {
 					assert(nq->node);
-					if (sysdata->verbose > 1) printf("queue_deliver: sending broadcast msg to node:%d\n", nq->node->handle);
+					logger(sysdata->logging, 2, "queue_deliver: sending broadcast msg to node:%d", nq->node->handle);
 					assert(msg->id == 0);
 					assert(msg->target_node == NULL);
 					sendMessage(nq->node, msg);
@@ -507,7 +504,7 @@ void queue_deliver(queue_t *queue)
 				ll_push_head(&nq->node->out_msg, msg);
 
 				// send the message to the node.
-				if (sysdata->verbose > 1) printf("queue_deliver: sending msg to node:%d\n", nq->node->handle);
+				logger(sysdata->logging, 2, "queue_deliver: sending msg to node:%d", nq->node->handle);
 				sendMessage(nq->node, msg);
 				// increment the 'waiting' count for the nq.
 				nq->waiting ++;
@@ -527,8 +524,8 @@ void queue_deliver(queue_t *queue)
 				ll_push_head(&queue->msg_proc, msg);
 			}
 			else {
-				if (sysdata->verbose > 1)
-					printf("queue_deliver. q:%d, no nodes ready to consume.\n", queue->qid);
+				logger(sysdata->logging, 2,
+					"queue_deliver. q:%d, no nodes ready to consume.", queue->qid);
 
 				// we couldn't process the message, so put it back.
 				ll_push_head(&queue->msg_pending, msg);
@@ -536,8 +533,8 @@ void queue_deliver(queue_t *queue)
 		}
 	}
 	else {
-		if (sysdata->verbose > 1)
-			printf("queue_deliver: queue:%d, no messages waiting.\n", queue->qid);
+		logger(sysdata->logging, 2,
+			"queue_deliver: queue:%d, no messages waiting.", queue->qid);
 	}
 }
 

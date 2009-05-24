@@ -1,5 +1,6 @@
 // signals.c
 
+#include "logging.h"
 #include "queue.h"
 #include "server.h"
 #include "signals.h"
@@ -10,6 +11,7 @@
 #include <assert.h>
 #include <event.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 //-----------------------------------------------------------------------------
@@ -29,17 +31,15 @@ void sigint_handler(evutil_socket_t fd, short what, void *arg)
 	stats_t *stats;
 	queue_t *q;
 	node_t *node;
-	int i;
 	void *next;
 	controller_t *ct;
 	
-	printf("SIGINT\n");
+	logger(sysdata->logging, 3, "SIGINT");
 
 	assert(sysdata);
-	assert(sysdata->server);
+	assert(sysdata->servers);
 	assert(sysdata->verbose >= 0);
 
-	server = sysdata->server;
 	verbose = sysdata->verbose;
 
 	// delete the sigint event, we dont need it anymore.
@@ -52,45 +52,35 @@ void sigint_handler(evutil_socket_t fd, short what, void *arg)
 	event_free(sysdata->sighup_event);
 	sysdata->sighup_event = NULL;
 
-	if (verbose) printf("Shutting down server object.\n");
-
-	// close the listening handle and remove the listening event, we dont want
-	// to accept any more connections.
-	if (verbose) printf("Closing listening sockets.\n");
-	for (i=0; i<MAX_SERVERS; i++) {
-		if (server->servers[i].handle != INVALID_HANDLE) {
-			if (verbose) printf("Closing socket %d.\n", server->servers[i].handle);
-
-			assert(server->servers[i].event);
-			event_free(server->servers[i].event);
-			server->servers[i].event = NULL;
-			close(server->servers[i].handle);
-			server->servers[i].handle = INVALID_HANDLE;
-		}
+	logger(sysdata->logging, 2, "Shutting down servers.");
+	while ((server = ll_pop_head(sysdata->servers))) {
+		server_shutdown(server);
+		server_free(server);
+		free(server);
 	}
 
 	// All active nodes should be informed that we are shutting down.
-	if (verbose) printf("Firing event to shutdown nodes.\n");
+	logger(sysdata->logging, 2, "Shutting down nodes.");
 	assert(sysdata->nodelist);
 	next = ll_start(sysdata->nodelist);
 	while ((node = ll_next(sysdata->nodelist, &next))) {
 		assert(node->handle > 0);
-		if (verbose) printf("Initiating shutdown of node %d.\n", node->handle);
+		logger(sysdata->logging, 2, "Initiating shutdown of node %d.", node->handle);
 		node_shutdown(node);
 	}
 
 	// Now attempt to shutdown all the queues.  Basically, this just means that the queue will close down all the 'waiting' consumers.
-	if (verbose) printf("Initiating shutdown of queues.\n");
+	logger(sysdata->logging, 2, "Initiating shutdown of queues.");
 	next = ll_start(sysdata->queues);
 	while ((q = ll_next(sysdata->queues, &next))) {
 		assert(q->name != NULL);
 		assert(q->qid > 0);
-		if (verbose) printf("Initiating shutdown of queue %d ('%s').\n", q->qid, q->name);
+		logger(sysdata->logging, 2, "Initiating shutdown of queue %d ('%s').", q->qid, q->name);
 		queue_shutdown(q);
 	}
 
 	// if we have controllers that are attempting to connect, we need to change their status so that they dont.
-	if (verbose) printf("Stopping controllers that are connecting.\n");
+	logger(sysdata->logging, 2, "Stopping controllers that are connecting.");
 	next = ll_start(sysdata->controllers);
 	while ((ct = ll_next(sysdata->controllers, &next))) {
 		BIT_SET(ct->flags, FLAG_CONTROLLER_FAILED);
@@ -115,6 +105,7 @@ void sigint_handler(evutil_socket_t fd, short what, void *arg)
 
 void sighup_handler(evutil_socket_t fd, short what, void *arg)
 {
-	printf("SIGHUP\n");
+	system_data_t *sysdata = (system_data_t *) arg;
+	logger(sysdata->logging, 2, "SIGHUP");
 }
 

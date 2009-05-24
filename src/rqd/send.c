@@ -1,5 +1,6 @@
 // send.c
 
+#include "logging.h"
 #include "send.h"
 #include "queue.h"
 
@@ -58,7 +59,7 @@ void sendMessage(node_t *node, message_t *msg)
 	q = msg->queue;
 	assert(q->qid > 0);
 
-	if (node->sysdata->verbose > 1) printf("sendMessage.  Node:%d, msg_id:%d\n", node->handle, msg->id);
+	logger(node->sysdata->logging, 2, "sendMessage.  Node:%d, msg_id:%d", node->handle, msg->id);
 
 
 	// add the commands to the out queue.
@@ -117,8 +118,8 @@ void sendDelivered(node_t *node, message_id_t msgid)
 	node_write_now(node, build->length, build->data);
 	expbuf_clear(build);
 
-	if (node->sysdata->verbose > 1)
-		printf("sendDelivered.  node=%d, msgid=%d\n",
+	logger(node->sysdata->logging, 2,
+			"sendDelivered.  node=%d, msgid=%d",
 			node->handle, msgid);
 }
 
@@ -146,8 +147,8 @@ void sendUndelivered(node_t *node, message_id_t msgid)
 	node_write_now(node, build->length, build->data);
 	expbuf_clear(build);
 	
-	if (node->sysdata->verbose > 1)
-		printf("sendUndelivered.  node=%d, msgid=%d\n",
+	logger(node->sysdata->logging, 2,
+			"sendUndelivered.  node=%d, msgid=%d",
 			node->handle, msgid);
 }
 

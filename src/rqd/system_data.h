@@ -2,6 +2,8 @@
 #define __SYSTEM_DATA_H
 
 #include "logging.h"
+#include "settings.h"
+#include "stats.h"
 
 #include <event.h>
 #include <expbufpool.h>
@@ -13,22 +15,23 @@
 typedef struct {
 	struct event_base *evbase;
 	risp_t *risp;
-	expbuf_pool_t *bufpool;
+	
 	mempool_t *msgpool;
+	
+	expbuf_pool_t *bufpool;
+	expbuf_t *in_buf, *build_buf;
 
 	struct event *sighup_event;
 	struct event *sigint_event;
 	struct event *stats_event;
 
-	expbuf_t *in_buf, *build_buf;
-	
 	int verbose;
-	void *settings;
-	void *server;
-	void *stats;
+	settings_t *settings;
+	stats_t *stats;
 	list_t *queues;
 	list_t *nodelist;
 	list_t *controllers;
+	list_t *servers;
 
 	logging_t *logging;
 } system_data_t;

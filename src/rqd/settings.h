@@ -18,18 +18,9 @@ typedef struct {
 	char daemonize;
 	char *username;
 	char *pid_file;
-
-	// interfaces that we will bind to.
-	char *interface[MAX_INTERFACES];
-	int interfaces;
-
-	// port that we will listen on, on all interfaces.
 	int port;
-
-	// connections to other controllers.
-	list_t controllers;
-
-	// logfile
+	list_t *interfaces;
+	list_t *controllers;
 	char *logfile;
 } settings_t;
 

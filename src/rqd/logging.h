@@ -3,6 +3,8 @@
 
 #include <expbuf.h>
 
+#define DEFAULT_LOG_TIMER 1
+
 typedef struct {
 	struct event_base *evbase;
 	struct event *log_event;

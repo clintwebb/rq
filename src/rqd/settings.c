@@ -4,6 +4,7 @@
 
 #include <assert.h>
 #include <rq.h>
+#include <stdlib.h>
 
 
 
@@ -12,8 +13,6 @@
 // Initialise the settings structure.
 void settings_init(settings_t *ptr)
 {
-	int i;
-	
 	assert(ptr != NULL);
 
 	ptr->port = RQ_DEFAULT_PORT;
@@ -23,12 +22,11 @@ void settings_init(settings_t *ptr)
 	ptr->username = NULL;
 	ptr->pid_file = NULL;
 
-	ptr->interfaces = 0;
-	for (i=0; i<MAX_INTERFACES; i++) {
-		ptr->interface[i] = NULL;
-	}
+	ptr->interfaces = (list_t *) malloc(sizeof(list_t));
+	ll_init(ptr->interfaces);
 
-	ll_init(&ptr->controllers);
+	ptr->controllers = (list_t *) malloc(sizeof(list_t));
+	ll_init(ptr->controllers);
 
 	ptr->logfile = NULL;
 }
@@ -39,8 +37,19 @@ void settings_init(settings_t *ptr)
 // just includes the list of controllers.
 void settings_cleanup(settings_t *ptr) 
 {
+	char *str;
+	
 	assert(ptr != NULL);
-	ll_free(&ptr->controllers);
+
+	while ((str = ll_pop_head(ptr->interfaces))) { free(str); }
+	ll_free(ptr->interfaces);
+	free(ptr->interfaces);
+	ptr->interfaces = NULL;
+	
+	while ((str = ll_pop_head(ptr->controllers))) { free(str); }
+	ll_free(ptr->controllers);
+	free(ptr->controllers);
+	ptr->controllers = NULL;
 }
 
 

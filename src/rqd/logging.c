@@ -57,15 +57,6 @@ void logging_free(logging_t *logging)
 }
 
 
-//-----------------------------------------------------------------------------
-// Mark the logging system so that it no longer uses events to buffer the
-// output.  it will do this by simply removing the evbase pointer.
-void logging_direct(logging_t *logging)
-{
-	assert(logging);
-	assert(logging->evbase);
-	logging->evbase = NULL;
-}
 
 
 //-----------------------------------------------------------------------------
@@ -73,10 +64,46 @@ void logging_direct(logging_t *logging)
 // create the file if it is not there, otherwise it will append to it.
 static void logger_print(logging_t *logging, expbuf_t *buf)
 {
+	FILE *fp;
+	
 	assert(logging);
 	assert(buf);
 	
-	assert(0);
+	assert(buf->length > 0);
+	assert(buf->data);
+	
+	assert(logging->filename);
+	fp = fopen(logging->filename, "a");
+	if (fp) {
+		fputs(expbuf_string(buf), fp);
+		fclose(fp);
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Mark the logging system so that it no longer uses events to buffer the
+// output.  it will do this by simply removing the evbase pointer.
+void logging_direct(logging_t *logging)
+{
+	assert(logging);
+	assert(logging->evbase);
+
+	// Delete the log event if there is one.
+	if (logging->log_event) {
+		event_free(logging->log_event);
+		logging->log_event = NULL;
+	}
+
+	// remove the base from the log structure.
+	logging->evbase = NULL;
+
+	// if we having pending data to write, then we should write it now (because
+	// there wont be any more events, and there might not be any more log
+	// entries to push it out)
+	if (logging->outbuf->length > 0) {
+		logger_print(logging, logging->outbuf);
+		expbuf_clear(logging->outbuf);
+	}
 }
 
 
@@ -86,7 +113,6 @@ static void logger_print(logging_t *logging, expbuf_t *buf)
 static void logger_handler(int fd, short int flags, void *arg)
 {
 	logging_t *logging;
-	FILE *fp;
 
 	assert(fd < 0);
 	assert(arg);
@@ -98,13 +124,10 @@ static void logger_handler(int fd, short int flags, void *arg)
 	event_free(logging->log_event);
 	logging->log_event = NULL;
 
-	assert(logging->filename);
-	fp = fopen(logging->filename, "a");
-	if (fp) {
-		fputs(expbuf_string(logging->outbuf), fp);
-		fclose(fp);
-		expbuf_clear(logging->outbuf);
-	}
+	assert(logging->outbuf->length > 0);
+
+	logger_print(logging, logging->outbuf);
+	expbuf_clear(logging->outbuf);
 }
 
 
@@ -119,7 +142,7 @@ void logger(logging_t *logging, short int level, const char *format, ...)
   va_list ap;
   int redo;
   int n;
- 	struct timeval t = {.tv_sec = 5, .tv_usec = 0};
+ 	struct timeval t = {.tv_sec = DEFAULT_LOG_TIMER, .tv_usec = 0};
 
 	
 	assert(logging);
@@ -133,7 +156,7 @@ void logger(logging_t *logging, short int level, const char *format, ...)
 		gettimeofday(&tv, NULL);
 		curtime=tv.tv_sec;
 		strftime(buffer, 30, "%Y-%m-%d %T.", localtime(&curtime));
-		snprintf(timebuf, 48, "%s%ld ", buffer, tv.tv_usec);
+		snprintf(timebuf, 48, "%s%06ld ", buffer, tv.tv_usec);
 
 		assert(logging->buildbuf);
 		assert(logging->buildbuf->length == 0);

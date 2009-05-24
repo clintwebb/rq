@@ -2,6 +2,7 @@
 
 
 #include "commands.h"
+#include "logging.h"
 #include "node.h"
 #include "process.h"
 #include "send.h"
@@ -41,8 +42,8 @@ void cmdInvalid(void *base, void *data, risp_length_t len)
 	assert(node->sysdata != NULL);
 	assert(node->sysdata->verbose >= 0);
 	
-	if (node->sysdata->verbose > 0)
-		printf("Received invalid (%d)): [%d, %d, %d]\n", len, cast[0], cast[1], cast[2]);
+	logger(node->sysdata->logging, 1, 
+		"Received invalid (%d)): [%d, %d, %d]", len, cast[0], cast[1], cast[2]);
 		
 	assert(0);
 }
@@ -62,7 +63,7 @@ void cmdClear(void *base)
  	
  	assert(node->sysdata != NULL);
 	assert(node->sysdata->verbose >= 0);
-	if (node->sysdata->verbose > 1) printf("node:%d CLEAR\n", node->handle);
+	logger(node->sysdata->logging, 3, "node:%d CLEAR", node->handle);
 }
 
 //-----------------------------------------------------------------------------
@@ -119,8 +120,8 @@ void cmdRequest(void *base)
 
 	assert(node->sysdata != NULL);
 	assert(node->sysdata->verbose >= 0);
-	if (node->sysdata->verbose > 1)
-		printf("node:%d REQUEST (flags:%x, mask:%x)\n", node->handle, node->data.flags, node->data.mask);
+	logger(node->sysdata->logging, 3, 
+		"node:%d REQUEST (flags:%x, mask:%x)", node->handle, node->data.flags, node->data.mask);
 }
 
 
@@ -137,8 +138,8 @@ void cmdReply(void *base)
 	// ensure only the legal data is used.
 	node->data.mask &= (DATA_MASK_ID | DATA_MASK_PAYLOAD);
 
-	if (node->sysdata->verbose > 1)
-		printf("node:%d REPLY (flags:%x, mask:%x)\n", node->handle, node->data.flags, node->data.mask);
+	logger(node->sysdata->logging, 3, 
+		"node:%d REPLY (flags:%x, mask:%x)", node->handle, node->data.flags, node->data.mask);
 }
 
 void cmdBroadcast(void *base)
@@ -158,8 +159,9 @@ void cmdBroadcast(void *base)
 
 	assert(node->sysdata != NULL);
 	assert(node->sysdata->verbose >= 0);
-	if (node->sysdata->verbose > 1)
-		printf("node:%d BROADCAST (flags:%x, mask:%x)\n", node->handle, node->data.flags, node->data.mask);
+	logger(node->sysdata->logging, 3, 
+		"node:%d BROADCAST (flags:%x, mask:%x)",
+		node->handle, node->data.flags, node->data.mask);
 }
 
 void cmdNoReply(void *base)
@@ -180,8 +182,9 @@ void cmdNoReply(void *base)
 
 	assert(node->sysdata != NULL);
 	assert(node->sysdata->verbose >= 0);
-	if (node->sysdata->verbose > 1)
-		printf("node:%d NOREPLY (flags:%x, mask:%x)\n", node->handle, node->data.flags, node->data.mask);
+	logger(node->sysdata->logging, 3, 
+		"node:%d NOREPLY (flags:%x, mask:%x)",
+		node->handle, node->data.flags, node->data.mask);
 }
 
 
@@ -201,8 +204,9 @@ void cmdExclusive(void *base)
 
 	assert(node->sysdata != NULL);
 	assert(node->sysdata->verbose >= 0);
-	if (node->sysdata->verbose > 1)
-		printf("node:%d EXCLUSIVE (flags:%x, mask:%x)\n", node->handle, node->data.flags, node->data.mask);
+	logger(node->sysdata->logging, 3, 
+		"node:%d EXCLUSIVE (flags:%x, mask:%x)",
+		node->handle, node->data.flags, node->data.mask);
 }
 
 
@@ -223,8 +227,9 @@ void cmdClosing(void *base)
 	
 	assert(node->sysdata != NULL);
 	assert(node->sysdata->verbose >= 0);
-	if (node->sysdata->verbose > 1)
-		printf("node:%d CLOSING (flags:%x, mask:%x)\n", node->handle, node->data.flags, node->data.mask);
+	logger(node->sysdata->logging, 3, 
+		"node:%d CLOSING (flags:%x, mask:%x)",
+		node->handle, node->data.flags, node->data.mask);
 }
 
 
@@ -244,9 +249,9 @@ void cmdConsume(void *base)
 	node->data.mask &= (DATA_MASK_QUEUE | DATA_MASK_MAX | DATA_MASK_PRIORITY);
 
 	assert(node->sysdata != NULL);
-	assert(node->sysdata->verbose >= 0);
-	if (node->sysdata->verbose > 1)
-		printf("node:%d CONSUME (flags:%x, mask:%x)\n", node->handle, node->data.flags, node->data.mask);
+	logger(node->sysdata->logging, 3,
+		"node:%d CONSUME (flags:%x, mask:%x)",
+		node->handle, node->data.flags, node->data.mask);
 }
 
 void cmdCancelQueue(void *base)
@@ -261,9 +266,8 @@ void cmdCancelQueue(void *base)
 	node->data.mask &= (DATA_MASK_QUEUE | DATA_MASK_QUEUEID);
 
 	assert(node->sysdata != NULL);
-	assert(node->sysdata->verbose >= 0);
-	if (node->sysdata->verbose > 1)
-		printf("node:%d CANCEL QUEUE (flags:%x, mask:%x)\n", node->handle, node->data.flags, node->data.mask);
+	logger(node->sysdata->logging, 3,
+		"node:%d CANCEL QUEUE (flags:%x, mask:%x)", node->handle, node->data.flags, node->data.mask);
 }
 
 void cmdId(void *base, risp_int_t value)
@@ -279,8 +283,9 @@ void cmdId(void *base, risp_int_t value)
 	
 	assert(node->sysdata != NULL);
 	assert(node->sysdata->verbose >= 0);
-	if (node->sysdata->verbose > 1)
-		printf("node:%d ID (%d) (flags:%x, mask:%x)\n", node->handle, value, node->data.flags, node->data.mask);
+	logger(node->sysdata->logging, 3, 
+		"node:%d ID (%d) (flags:%x, mask:%x)",
+		node->handle, value, node->data.flags, node->data.mask);
 }
 
 void cmdQueueID(void *base, risp_int_t value)
@@ -292,8 +297,8 @@ void cmdQueueID(void *base, risp_int_t value)
 	BIT_SET(node->data.mask, DATA_MASK_QUEUEID);
 
 	assert(node->sysdata != NULL);
-	if (node->sysdata->verbose > 1)
-		printf("node:%d QUEUEID (%d)\n", node->handle, value);
+	logger(node->sysdata->logging, 3, 
+		"node:%d QUEUEID (%d)", node->handle, value);
 }
 
 
@@ -306,10 +311,10 @@ void cmdTimeout(void *base, risp_int_t value)
  	assert(value >= 0 && value <= 0xffff);
 	node->data.timeout = value;
 	node->data.mask |= (DATA_MASK_TIMEOUT);
+
 	assert(node->sysdata != NULL);
-	assert(node->sysdata->verbose >= 0);
-	if (node->sysdata->verbose > 1)
-		printf("node:%d TIMEOUT (%d)\n", node->handle, value);
+	logger(node->sysdata->logging, 3,
+		"node:%d TIMEOUT (%d)", node->handle, value);
 }
 
 void cmdMax(void *base, risp_int_t value)
@@ -321,9 +326,8 @@ void cmdMax(void *base, risp_int_t value)
 	node->data.mask |= (DATA_MASK_MAX);
 
 	assert(node->sysdata != NULL);
-	assert(node->sysdata->verbose >= 0);
-	if (node->sysdata->verbose > 1)
-		printf("node:%d MAX (%d)\n", node->handle, value);
+	logger(node->sysdata->logging, 3,
+		"node:%d MAX (%d)", node->handle, value);
 }
 
 void cmdPriority(void *base, risp_int_t value)
@@ -335,9 +339,8 @@ void cmdPriority(void *base, risp_int_t value)
 	node->data.priority = value;
 
 	assert(node->sysdata != NULL);
-	assert(node->sysdata->verbose >= 0);
-	if (node->sysdata->verbose > 1)
-		printf("node:%d PRIORITY (%d)\n", node->handle, value);
+	logger(node->sysdata->logging, 3,
+		"node:%d PRIORITY (%d)", node->handle, value);
 }
 
 
@@ -351,9 +354,8 @@ void cmdQueue(void *base, risp_length_t length, risp_char_t *data)
  	BIT_SET(node->data.mask, DATA_MASK_QUEUE);
 	
 	assert(node->sysdata != NULL);
-	assert(node->sysdata->verbose >= 0);
-	if (node->sysdata->verbose > 1)
-		printf("node:%d QUEUE (%s)\n", node->handle, expbuf_string(&node->data.queue));
+	logger(node->sysdata->logging, 3, 
+		"node:%d QUEUE (%s)", node->handle, expbuf_string(&node->data.queue));
 }
 
 void cmdPayload(void *base, risp_length_t length, risp_char_t *data)
@@ -367,9 +369,8 @@ void cmdPayload(void *base, risp_length_t length, risp_char_t *data)
  	BIT_SET(node->data.mask, DATA_MASK_PAYLOAD);
 	
 	assert(node->sysdata != NULL);
-	assert(node->sysdata->verbose >= 0);
-	if (node->sysdata->verbose > 1)
-		printf("node:%d PAYLOAD (len:%d, flags:%x, mask:%x)\n",
+	logger(node->sysdata->logging, 3,
+		"node:%d PAYLOAD (len:%d, flags:%x, mask:%x)",
 			node->handle,
 			length,
 			node->data.flags,
@@ -391,9 +392,9 @@ void cmdReceived(void *base)
 	node->data.mask &= (DATA_MASK_ID | DATA_MASK_QUEUEID | DATA_MASK_QUEUE);
 
 	assert(node->sysdata != NULL);
-	assert(node->sysdata->verbose >= 0);
-	if (node->sysdata->verbose > 1)
-		printf("node:%d RECEIVED (flags:%x, mask:%x)\n", node->handle, node->data.flags, node->data.mask);
+	logger(node->sysdata->logging, 3, 
+		"node:%d RECEIVED (flags:%x, mask:%x)",
+		node->handle, node->data.flags, node->data.mask);
 }
 
 void cmdDelivered(void *base)
@@ -412,9 +413,9 @@ void cmdDelivered(void *base)
 	BIT_CLEAR(node->data.mask, DATA_MASK_PRIORITY | DATA_MASK_TIMEOUT | DATA_MASK_PAYLOAD);
 
 	assert(node->sysdata != NULL);
-	assert(node->sysdata->verbose >= 0);
-	if (node->sysdata->verbose > 1)
-		printf("node:%d DELIVERED (flags:%x, mask:%x)\n", node->handle, node->data.flags, node->data.mask);
+	logger(node->sysdata->logging, 3, 
+		"node:%d DELIVERED (flags:%x, mask:%x)",
+		node->handle, node->data.flags, node->data.mask);
 }
 
 
@@ -433,8 +434,9 @@ void cmdExecute(void *base)
 	assert(node->sysdata->verbose >= 0);
 	
  	assert(node->sysdata->stats != NULL);
-	if (node->sysdata->verbose > 1)
-		printf("node:%d EXECUTE (flags:%X, mask:%X)\n", node->handle, node->data.flags, node->data.mask);
+	logger(node->sysdata->logging, 3, 
+		"node:%d EXECUTE (flags:%X, mask:%X)",
+		node->handle, node->data.flags, node->data.mask);
 
 	if (BIT_TEST(node->data.flags, DATA_FLAG_REQUEST)) {
 		processRequest(node);
@@ -468,10 +470,40 @@ void cmdExecute(void *base)
 	else {
 		// while primary development is occuring will leave this assert in to catch some simple programming issues.  However, once this goes to production, this will need to be removed, because we want to ignore actions taht we dont understand.  This could mean that a new protocol has a command we dont know how to understand.  So we ignore it.
 		
-		if (node->sysdata->verbose)
-			printf("node:%d EXECUTE failed (flags:%x, mask:%x)\n",
+		logger(node->sysdata->logging, 1, 
+			"node:%d EXECUTE failed (flags:%x, mask:%x)",
 				node->handle, node->data.flags, node->data.mask);
 		
 		assert(0);
 	}
 }
+
+
+
+void command_init(risp_t *risp)
+{
+  assert(risp);
+	risp_add_invalid(risp, &cmdInvalid);
+	risp_add_command(risp, RQ_CMD_CLEAR,        &cmdClear);
+	risp_add_command(risp, RQ_CMD_EXECUTE,      &cmdExecute);
+	risp_add_command(risp, RQ_CMD_PING,         &cmdPing);
+	risp_add_command(risp, RQ_CMD_PONG,         &cmdPong);
+	risp_add_command(risp, RQ_CMD_REQUEST,      &cmdRequest);
+	risp_add_command(risp, RQ_CMD_REPLY,        &cmdReply);
+	risp_add_command(risp, RQ_CMD_RECEIVED,     &cmdReceived);
+	risp_add_command(risp, RQ_CMD_DELIVERED,    &cmdDelivered);
+	risp_add_command(risp, RQ_CMD_BROADCAST,    &cmdBroadcast);
+	risp_add_command(risp, RQ_CMD_NOREPLY,      &cmdNoReply);
+	risp_add_command(risp, RQ_CMD_CONSUME,      &cmdConsume);
+	risp_add_command(risp, RQ_CMD_CANCEL_QUEUE, &cmdCancelQueue);
+	risp_add_command(risp, RQ_CMD_CLOSING,      &cmdClosing);
+	risp_add_command(risp, RQ_CMD_EXCLUSIVE,    &cmdExclusive);
+	risp_add_command(risp, RQ_CMD_QUEUEID,      &cmdQueueID);
+	risp_add_command(risp, RQ_CMD_ID,           &cmdId);
+	risp_add_command(risp, RQ_CMD_TIMEOUT,      &cmdTimeout);
+	risp_add_command(risp, RQ_CMD_MAX,          &cmdMax);
+	risp_add_command(risp, RQ_CMD_PRIORITY,     &cmdPriority);
+	risp_add_command(risp, RQ_CMD_QUEUE,        &cmdQueue);
+	risp_add_command(risp, RQ_CMD_PAYLOAD,      &cmdPayload);
+}
+

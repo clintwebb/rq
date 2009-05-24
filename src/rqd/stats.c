@@ -1,8 +1,10 @@
 // stats.c
 
+#include "logging.h"
 #include "queue.h"
 #include "server.h"
 #include "stats.h"
+#include "system_data.h"
 
 
 #include <assert.h>
@@ -35,10 +37,11 @@ void stats_init(stats_t *stats)
 static void stats_handler(int fd, short int flags, void *arg)
 {
 	stats_t *stats;
+	system_data_t *sysdata;
 	int clients;
 	int queues;
 	int msg_pending, msg_proc;
-	server_t *server;
+// 	server_t *server;
 	queue_t *q;
 	void *n;
 
@@ -54,30 +57,29 @@ static void stats_handler(int fd, short int flags, void *arg)
 	stats->stats_event = NULL;
 	
 	assert(stats->sysdata);
-	assert(stats->sysdata->server != NULL);
+	sysdata = stats->sysdata;
 	
-	server = stats->sysdata->server;
+// 	assert(stats->sysdata->server != NULL);
+// 	server = stats->sysdata->server;
 
-	clients = ll_count(stats->sysdata->nodelist);
+	assert(sysdata->nodelist);
+	clients = ll_count(sysdata->nodelist);
 
 	queues = 0;
 	msg_pending = 0;
 	msg_proc = 0;
-	n = ll_start(stats->sysdata->queues);
-	q = ll_next(stats->sysdata->queues, &n);
-	while (q) {
+	n = ll_start(sysdata->queues);
+	while ((q = ll_next(sysdata->queues, &n))) {
 		queues ++;
 		msg_pending += ll_count(&q->msg_pending);
 		msg_proc += ll_count(&q->msg_proc);
-		
-		q = ll_next(stats->sysdata->queues, &n);
 	}
 
 	assert(stats != NULL);
 	if (stats->in_bytes || stats->out_bytes || stats->requests || stats->replies || stats->broadcasts || stats->re || stats->we) {
 
-		if (stats->sysdata->verbose)
-			printf("Bytes[%u/%u], Clients[%u], Requests[%u], Replies[%u], Broadcasts[%u], Queues[%u], Msgs[%d/%d], MsgPool[%u/%u], Events[%u/%u/%u]\n",
+		if (sysdata->verbose)
+			logger(sysdata->logging, 1, "Bytes[%u/%u], Clients[%u], Requests[%u], Replies[%u], Broadcasts[%u], Queues[%u], Msgs[%d/%d], MsgPool[%u/%u], Events[%u/%u/%u]",
 				stats->in_bytes,
 				stats->out_bytes,
 				clients,
@@ -86,7 +88,7 @@ static void stats_handler(int fd, short int flags, void *arg)
 				stats->broadcasts,
 				queues,
 				msg_pending, msg_proc,
-				mempool_active_count(stats->sysdata->msgpool), mempool_inactive_count(stats->sysdata->msgpool),
+				mempool_active_count(sysdata->msgpool), mempool_inactive_count(sysdata->msgpool),
 				stats->re, stats->we, stats->te);
 		
 		stats->in_bytes = 0;
@@ -103,7 +105,6 @@ static void stats_handler(int fd, short int flags, void *arg)
 	if (stats->shutdown == 0) {
 		stats_start(stats);
 	}
-	
 }
 
 
@@ -111,13 +112,17 @@ static void stats_handler(int fd, short int flags, void *arg)
 void stats_start(stats_t *stats)
 {
 	struct timeval t = {.tv_sec = 1, .tv_usec = 0};
+	system_data_t *sysdata;
 	
 	assert(stats);
 	assert(stats->stats_event == NULL);
 	assert(stats->sysdata);
-	assert(stats->sysdata->evbase);
+
+	sysdata = stats->sysdata;
+	assert(sysdata->evbase);
 		
-	stats->stats_event = evtimer_new(stats->sysdata->evbase, stats_handler, (void *) stats);
+	stats->stats_event = evtimer_new(sysdata->evbase, stats_handler, (void *) stats);
 	evtimer_add(stats->stats_event, &t);
+	assert(stats->stats_event);
 }
 

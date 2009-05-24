@@ -1,8 +1,6 @@
 #ifndef __STATS_H
 #define __STATS_H
 
-#include "system_data.h"
-
 #include <stdio.h>
 
 
@@ -14,7 +12,7 @@ typedef struct {
 	unsigned int broadcasts;
 	unsigned int re, we, te;
 	short shutdown;
-	system_data_t *sysdata;
+	void *sysdata;
 	struct event *stats_event;
 } stats_t;
 

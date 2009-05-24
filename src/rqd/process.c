@@ -1,5 +1,6 @@
 // process.c
 
+#include "logging.h"
 #include "message.h"
 #include "process.h"
 #include "queue.h"
@@ -97,7 +98,7 @@ void processRequest(node_t *node)
 		
 		// add the message to the queue.
 
-		if (node->sysdata->verbose > 1) printf("processRequest: node:%d, msg_id:%d, q:%d\n", node->handle, msg->id, q->qid);
+		logger(node->sysdata->logging, 2, "processRequest: node:%d, msg_id:%d, q:%d", node->handle, msg->id, q->qid);
 		assert(q->sysdata);
 		queue_addmsg(q, msg);
 
@@ -138,8 +139,8 @@ void processConsume(node_t *node)
 	// make sure that we have the minimum information that we need.
 	if (BIT_TEST(node->data.mask, DATA_MASK_QUEUE)) {
 
-		if (node->sysdata->verbose > 1)
-			printf("Processing QUEUE request from node:%d\n", node->handle);
+		logger(node->sysdata->logging, 2, 
+			"Processing QUEUE request from node:%d", node->handle);
 
 		assert(BIT_TEST(node->data.mask, DATA_MASK_QUEUE));
 		assert(node->data.queue.length > 0);
@@ -151,8 +152,8 @@ void processConsume(node_t *node)
 		
 		if (q == NULL) {
 			// we didn't find the queue...
-			if (node->sysdata->verbose > 1)
-				printf("Didn't find queue '%s', creating new entry.\n", expbuf_string(&node->data.queue));
+			logger(node->sysdata->logging, 2, 
+				"Didn't find queue '%s', creating new entry.", expbuf_string(&node->data.queue));
 			q = queue_create(node->sysdata, expbuf_string(&node->data.queue));
 		}
 	
@@ -306,7 +307,7 @@ void processDelivered(node_t *node)
 	msgid = node->data.id;
 	assert(msgid > 0);
 
-	if (node->sysdata->verbose > 1) printf("processDelivered.  Node:%d, msg_id:%d\n", node->handle, msgid);
+	logger(node->sysdata->logging, 2, "processDelivered.  Node:%d, msg_id:%d", node->handle, msgid);
 
 	// find message in node->out_msg
 	msg = node_findoutmsg(node, msgid);
@@ -319,7 +320,7 @@ void processDelivered(node_t *node)
 		if (BIT_TEST(msg->flags, FLAG_MSG_NOREPLY)) {
 			// message is NOREPLY,
 
-			if (node->sysdata->verbose > 1) printf("delivery(%d): Noreply.\n", msgid);
+			logger(node->sysdata->logging, 2, "delivery(%d): Noreply.", msgid);
 		
 			// assert that message doesnt have source-node.
 			assert(msg->source_node == NULL);
@@ -347,11 +348,11 @@ void processDelivered(node_t *node)
 			// if there are more messages in the queue, then we need to deliver them.
 			if (ll_count(&q->msg_pending) > 0) {
 			
-				if (node->sysdata->verbose > 1) printf("delivery(%d): setting delivery action.\n", msgid);
+				logger(node->sysdata->logging, 2, "delivery(%d): setting delivery action.", msgid);
 				queue_deliver(q);
 			}
 			else {
-				if (node->sysdata->verbose > 1) printf("delivery(%d): no items to deliver.\n", msgid);
+				logger(node->sysdata->logging, 2, "delivery(%d): no items to deliver.", msgid);
 			}
 		}
 		else {

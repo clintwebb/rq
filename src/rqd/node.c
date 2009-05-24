@@ -1,6 +1,7 @@
 // node.c
 
 #include "data.h"
+#include "logging.h"
 #include "node.h"
 #include "queue.h"
 #include "send.h"
@@ -117,7 +118,6 @@ void node_free(node_t *node)
 static void node_closed(node_t *node)
 {
 	message_t *msg;
-	server_t *server;
 	system_data_t *sysdata;
 	controller_t *ct;
 	
@@ -191,8 +191,7 @@ static void node_closed(node_t *node)
 	
 	// remove the node from the server object.
 	sysdata = node->sysdata;
-	server = sysdata->server;
-	assert(server);
+	assert(sysdata->nodelist);
 	assert(ll_count(sysdata->nodelist) > 0);
 	ll_remove(sysdata->nodelist, node, NULL);
 
@@ -254,8 +253,8 @@ void node_write_now(node_t *node, int length, char *data)
 			}
 		}
 		else if (res == 0) {
-			if (node->sysdata->verbose > 1)
-				printf("Node[%d] closed while writing.\n", node->handle);
+			logger(node->sysdata->logging, 2, 
+				"Node[%d] closed while writing.", node->handle);
 			assert(node->out);
 			node->handle = INVALID_HANDLE;
 			node_closed(node);
@@ -264,8 +263,8 @@ void node_write_now(node_t *node, int length, char *data)
 		else {
 			assert(res == -1);
 			if (errno != EAGAIN && errno != EWOULDBLOCK) {
-				if (node->sysdata->verbose > 1)
-					printf("Node[%d] closed while writing - because of error: %d\n", node->handle, errno);
+				logger(node->sysdata->logging, 2, 
+					"Node[%d] closed while writing - because of error: %d", node->handle, errno);
 				close(node->handle);
 				node->handle = INVALID_HANDLE;
 				node_closed(node);
@@ -383,8 +382,8 @@ void node_read_handler(int hid, short flags, void *data)
 				empty = 1;
 				
 				if (res == 0) {
-					if (node->sysdata->verbose > 2)
-						printf("Node[%d] closed while reading.\n", node->handle);
+					logger(node->sysdata->logging, 3, 
+						"Node[%d] closed while reading.", node->handle);
 					assert(node->out);
 					node->handle = INVALID_HANDLE;
 					node_closed(node);
@@ -393,8 +392,8 @@ void node_read_handler(int hid, short flags, void *data)
 				else {
 					assert(res == -1);
 					if (errno != EAGAIN && errno != EWOULDBLOCK) {
-						if (node->sysdata->verbose > 2)
-							printf("Node[%d] closed while reading- because of error: %d\n", node->handle, errno);
+						logger(node->sysdata->logging, 3, 
+							"Node[%d] closed while reading- because of error: %d", node->handle, errno);
 						close(node->handle);
 						node->handle = INVALID_HANDLE;
 						node_closed(node);
@@ -455,7 +454,7 @@ void node_write_handler(int hid, short flags, void *data)
 		}
 	}
 	else if (res == 0) {
-		if (node->sysdata->verbose > 1) printf("Node[%d] closed while writing.\n", node->handle);
+		logger(node->sysdata->logging, 3, "Node[%d] closed while writing.", node->handle);
 		assert(node->out);
 		node->handle = INVALID_HANDLE;
 		node_closed(node);
@@ -464,7 +463,7 @@ void node_write_handler(int hid, short flags, void *data)
 	else {
 		assert(res == -1);
 		if (errno != EAGAIN && errno != EWOULDBLOCK) {
-			if (node->sysdata->verbose > 1) printf("Node[%d] closed while writing - because of error: %d\n", node->handle, errno);
+			logger(node->sysdata->logging, 3, "Node[%d] closed while writing - because of error: %d", node->handle, errno);
 			close(node->handle);
 			node->handle = INVALID_HANDLE;
 			node_closed(node);

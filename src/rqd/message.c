@@ -1,4 +1,5 @@
 
+#include "logging.h"
 #include "message.h"
 #include "queue.h"
 
@@ -134,8 +135,9 @@ void message_delete(message_t *msg)
 		mempool_return(msg->sysdata->msgpool, msg);
 	}
 	else {
-		if (msg->sysdata->verbose)
-			printf("Unable to delete message(%X) since it is still referenced somewhere\n", (unsigned int)msg);
+		logger(msg->sysdata->logging, 2,
+			"Unable to delete message(%X) since it is still referenced somewhere",
+			(unsigned int)msg);
 	}
 }
 
