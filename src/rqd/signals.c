@@ -109,3 +109,16 @@ void sighup_handler(evutil_socket_t fd, short what, void *arg)
 	logger(sysdata->logging, 2, "SIGHUP");
 }
 
+void sigusr1_handler(evutil_socket_t fd, short what, void *arg)
+{
+	system_data_t *sysdata = (system_data_t *) arg;
+	log_inclevel(sysdata->logging);
+	logger(sysdata->logging, 0, "Loglevel increased to %d", log_getlevel(sysdata->logging));
+}
+
+void sigusr2_handler(evutil_socket_t fd, short what, void *arg)
+{
+	system_data_t *sysdata = (system_data_t *) arg;
+	log_declevel(sysdata->logging);
+	logger(sysdata->logging, 0, "Loglevel decreased to %d", log_getlevel(sysdata->logging));
+}

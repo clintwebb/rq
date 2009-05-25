@@ -21,8 +21,10 @@ typedef struct {
 	expbuf_pool_t *bufpool;
 	expbuf_t *in_buf, *build_buf;
 
-	struct event *sighup_event;
 	struct event *sigint_event;
+	struct event *sighup_event;
+	struct event *sigusr1_event;
+	struct event *sigusr2_event;
 	struct event *stats_event;
 
 	int verbose;

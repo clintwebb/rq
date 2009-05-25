@@ -129,23 +129,26 @@ static void init_sysdata(system_data_t *sysdata)
 {
 	assert(sysdata);
 	
-	sysdata->evbase       = NULL;
-	sysdata->bufpool      = NULL;
-	sysdata->verbose      = 0;
-	sysdata->settings     = NULL;
-	sysdata->servers      = NULL;
-	sysdata->stats        = NULL;
-	sysdata->risp         = NULL;
-	sysdata->queues       = NULL;
-	sysdata->msgpool      = NULL;
-	sysdata->sighup_event = NULL;
-	sysdata->sigint_event = NULL;
-	sysdata->nodelist     = NULL;
-	sysdata->controllers  = NULL;
-	sysdata->stats_event  = NULL;
-	sysdata->logging      = NULL;
-	sysdata->in_buf       = NULL;
-	sysdata->build_buf    = NULL;
+	sysdata->evbase        = NULL;
+	sysdata->bufpool       = NULL;
+	sysdata->verbose       = 0;
+	sysdata->settings      = NULL;
+	sysdata->servers       = NULL;
+	sysdata->stats         = NULL;
+	sysdata->risp          = NULL;
+	sysdata->queues        = NULL;
+	sysdata->msgpool       = NULL;
+	sysdata->sighup_event  = NULL;
+	sysdata->sigint_event  = NULL;
+	sysdata->sigusr1_event = NULL;
+	sysdata->sigusr2_event = NULL;
+
+	sysdata->nodelist      = NULL;
+	sysdata->controllers   = NULL;
+	sysdata->stats_event   = NULL;
+	sysdata->logging       = NULL;
+	sysdata->in_buf        = NULL;
+	sysdata->build_buf     = NULL;
 }
 
 static void cleanup_sysdata(system_data_t *sysdata)
@@ -296,6 +299,16 @@ static void init_signals(system_data_t *sysdata)
 	sysdata->sigint_event = evsignal_new(sysdata->evbase, SIGINT, sigint_handler, sysdata);
 	assert(sysdata->sigint_event);
 	event_add(sysdata->sigint_event, NULL);
+
+	assert(sysdata->sigusr1_event == NULL);
+	sysdata->sigusr1_event = evsignal_new(sysdata->evbase, SIGUSR1, sigusr1_handler, sysdata);
+	assert(sysdata->sigusr1_event);
+	event_add(sysdata->sigusr1_event, NULL);
+
+	assert(sysdata->sigusr2_event == NULL);
+	sysdata->sigusr2_event = evsignal_new(sysdata->evbase, SIGUSR2, sigusr2_handler, sysdata);
+	assert(sysdata->sigusr2_event);
+	event_add(sysdata->sigusr2_event, NULL);
 }
 
 static void cleanup_signals(system_data_t *sysdata)
