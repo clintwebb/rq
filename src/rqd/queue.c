@@ -1,11 +1,11 @@
 
 
-#include "logging.h"
 #include "queue.h"
 #include "send.h"
 #include "server.h"
 
 #include <assert.h>
+#include <evlogging.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

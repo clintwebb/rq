@@ -1,6 +1,5 @@
 // signals.c
 
-#include "logging.h"
 #include "queue.h"
 #include "server.h"
 #include "signals.h"
@@ -10,6 +9,7 @@
 
 #include <assert.h>
 #include <event.h>
+#include <evlogging.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -98,7 +98,7 @@ void sigint_handler(evutil_socket_t fd, short what, void *arg)
 	stats->shutdown ++;
 
 	// Tell the logging system not to use events anymore.
-	logging_direct(sysdata->logging);
+	log_direct(sysdata->logging);
 }
 
 

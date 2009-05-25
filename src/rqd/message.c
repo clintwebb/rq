@@ -1,9 +1,9 @@
 
-#include "logging.h"
 #include "message.h"
 #include "queue.h"
 
 #include <assert.h>
+#include <evlogging.h>
 #include <rq.h>
 #include <stdio.h>
 #include <stdlib.h>

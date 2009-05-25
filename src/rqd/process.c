@@ -1,6 +1,5 @@
 // process.c
 
-#include "logging.h"
 #include "message.h"
 #include "process.h"
 #include "queue.h"
@@ -8,6 +7,7 @@
 #include "stats.h"
 
 #include <assert.h>
+#include <evlogging.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>

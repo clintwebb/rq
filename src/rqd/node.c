@@ -1,7 +1,6 @@
 // node.c
 
 #include "data.h"
-#include "logging.h"
 #include "node.h"
 #include "queue.h"
 #include "send.h"
@@ -11,6 +10,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <event.h>
+#include <evlogging.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>

@@ -1,6 +1,5 @@
 // stats.c
 
-#include "logging.h"
 #include "queue.h"
 #include "server.h"
 #include "stats.h"
@@ -8,6 +7,7 @@
 
 
 #include <assert.h>
+#include <evlogging.h>
 #include <stdio.h>
 
 

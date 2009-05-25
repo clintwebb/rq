@@ -262,15 +262,20 @@ static void init_logging(system_data_t *sysdata)
 	assert(sysdata->evbase);
 	
 	sysdata->logging = (logging_t *) malloc(sizeof(logging_t));
-	logging_init(sysdata->logging, sysdata->evbase, sysdata->settings->logfile, sysdata->verbose);
+	log_init(sysdata->logging, sysdata->settings->logfile, sysdata->verbose);
+	log_buffered(sysdata->logging, sysdata->evbase);
 }
 
 static void cleanup_logging(system_data_t *sysdata)
 {
 	assert(sysdata);
 	assert(sysdata->logging);
+
+	// normally before freeing the log, you would set it in direct mode to
+	// ensure that it flushes any leftover entries out... but that would
+	// already have been done.
 	
-	logging_free(sysdata->logging);
+	log_free(sysdata->logging);
 	free(sysdata->logging);
 	sysdata->logging = NULL;
 }

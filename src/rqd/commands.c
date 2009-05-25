@@ -2,12 +2,12 @@
 
 
 #include "commands.h"
-#include "logging.h"
 #include "node.h"
 #include "process.h"
 #include "send.h"
 
 #include <assert.h>
+#include <evlogging.h>
 #include <risp.h>
 #include <rq.h>
 #include <stdio.h>

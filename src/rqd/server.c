@@ -1,14 +1,13 @@
 // server.c
 
-#include "logging.h"
 #include "server.h"
 #include "commands.h"
-#include "logging.h"
 #include "queue.h"
 #include "settings.h"
 
 #include <assert.h>
 #include <errno.h>
+#include <evlogging.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>

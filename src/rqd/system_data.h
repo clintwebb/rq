@@ -1,11 +1,11 @@
 #ifndef __SYSTEM_DATA_H
 #define __SYSTEM_DATA_H
 
-#include "logging.h"
 #include "settings.h"
 #include "stats.h"
 
 #include <event.h>
+#include <evlogging.h>
 #include <expbufpool.h>
 #include <linklist.h>
 #include <mempool.h>

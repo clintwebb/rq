@@ -1,11 +1,11 @@
 // send.c
 
-#include "logging.h"
 #include "send.h"
 #include "queue.h"
 
 #include <assert.h>
 #include <errno.h>
+#include <evlogging.h>
 #include <rispbuf.h>
 #include <stdio.h>
 #include <string.h>
