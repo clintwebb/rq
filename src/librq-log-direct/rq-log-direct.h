@@ -1,5 +1,5 @@
-#ifndef __RQ_LOG_H
-#define __RQ_LOG_H
+#ifndef __RQ_LOG_DIRECT_H
+#define __RQ_LOG_DIRECT_H
 
 #include <rq.h>
 #include <expbuf.h>
