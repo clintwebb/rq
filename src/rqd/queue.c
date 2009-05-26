@@ -642,3 +642,33 @@ void queue_set_id(list_t *queues, const char *name, queue_id_t id)
 		}
 	}
 }
+
+
+
+// This function is used to dump detailed information about the queue to a expanding buffer.
+void queue_dump(queue_t *q, expbuf_t *buf)
+{
+	assert(q && buf);
+
+	assert(q->name);
+
+	expbuf_print(buf, "\tName: %s\n", q->name);
+	expbuf_print(buf, "\tID: %d\n", q->qid);
+
+	expbuf_print(buf, "\tFlags: ");
+	if (BIT_TEST(q->flags, QUEUE_FLAG_EXCLUSIVE))
+		expbuf_print(buf, "EXCLUSIVE ");
+	expbuf_print(buf, "\n");
+	
+	expbuf_print(buf, "\tMessages Pending: %d\n", ll_count(&q->msg_pending));
+	// TODO: show info about the pending messages.
+	expbuf_print(buf, "\tMessages Processing: %d\n", ll_count(&q->msg_proc));
+	// TODO: show info about the processing messages.
+	expbuf_print(buf, "\tNodes Ready: %d\n", ll_count(&q->nodes_ready));
+	// todo: show info about the ready nodes.
+	expbuf_print(buf, "\tNodes Busy: %d\n", ll_count(&q->nodes_busy));
+	// todo: show info about the busy nodes.
+	expbuf_print(buf, "\tNodes Waiting: %d\n", ll_count(&q->nodes_waiting));
+	// todo: show info about the waiting nodes.
+}
+

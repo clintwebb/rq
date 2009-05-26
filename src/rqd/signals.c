@@ -27,7 +27,6 @@ void sigint_handler(evutil_socket_t fd, short what, void *arg)
 {
 	system_data_t *sysdata = (system_data_t *) arg;
 	server_t *server;
-	unsigned char verbose = 0;
 	stats_t *stats;
 	queue_t *q;
 	node_t *node;
@@ -38,9 +37,6 @@ void sigint_handler(evutil_socket_t fd, short what, void *arg)
 
 	assert(sysdata);
 	assert(sysdata->servers);
-	assert(sysdata->verbose >= 0);
-
-	verbose = sysdata->verbose;
 
 	// delete the sigint event, we dont need it anymore.
 	assert(sysdata->sigint_event);
@@ -51,6 +47,16 @@ void sigint_handler(evutil_socket_t fd, short what, void *arg)
 	assert(sysdata->sighup_event);
 	event_free(sysdata->sighup_event);
 	sysdata->sighup_event = NULL;
+
+	// delete the sigusr1 event, we dont need that either.
+	assert(sysdata->sigusr1_event);
+	event_free(sysdata->sigusr1_event);
+	sysdata->sigusr1_event = NULL;
+
+	// delete the sigusr2 event, we dont need that either.
+	assert(sysdata->sigusr2_event);
+	event_free(sysdata->sigusr2_event);
+	sysdata->sigusr2_event = NULL;
 
 	logger(sysdata->logging, 2, "Shutting down servers.");
 	while ((server = ll_pop_head(sysdata->servers))) {
@@ -106,7 +112,58 @@ void sigint_handler(evutil_socket_t fd, short what, void *arg)
 void sighup_handler(evutil_socket_t fd, short what, void *arg)
 {
 	system_data_t *sysdata = (system_data_t *) arg;
-	logger(sysdata->logging, 2, "SIGHUP");
+	expbuf_t *buf;
+	queue_t *q;
+	void *next;
+	
+	assert(sysdata);
+	assert(sysdata->bufpool);
+	buf = expbuf_pool_new(sysdata->bufpool, 1024);
+
+	expbuf_print(buf, "Complete data dump\n");
+
+	assert(sysdata->msgpool);
+	expbuf_print(buf, "Mempool:\n\tActive=%u\n\tInactive=%u\n\n",
+		mempool_active_count(sysdata->msgpool),
+		mempool_inactive_count(sysdata->msgpool));
+
+	assert(sysdata->in_buf);
+	assert(sysdata->build_buf);
+	expbuf_print(buf, "In Buffer size: %d\n", BUF_MAX(sysdata->in_buf));
+	expbuf_print(buf, "Build Buffer size: %d\n", BUF_MAX(sysdata->build_buf));
+
+	expbuf_print(buf, "\nEvents:\n");
+	expbuf_print(buf, "\tsigint: %s\n",  sysdata->sigint_event  ? "yes" : "no");
+	expbuf_print(buf, "\tsighup: %s\n",  sysdata->sighup_event  ? "yes" : "no");
+	expbuf_print(buf, "\tsigusr1: %s\n", sysdata->sigusr1_event ? "yes" : "no");
+	expbuf_print(buf, "\tsigusr2: %s\n", sysdata->sigusr2_event ? "yes" : "no");
+
+// 	list_t *servers;
+
+// 	list_t *controllers;
+
+// 	list_t *nodelist;
+
+	expbuf_print(buf, "\nQueues:\n");
+	assert(sysdata->queues);
+	next = ll_start(sysdata->queues);
+	while ((q = ll_next(sysdata->queues, &next))) {
+		queue_dump(q, buf);
+	}
+	
+ 
+ 
+	assert(sysdata->logging);
+	expbuf_print(buf, "\nLogging:\n");
+	expbuf_print(buf, "\tLog Level: %d\n", log_getlevel(sysdata->logging));
+  expbuf_print(buf, "\tDump string length: ");
+	expbuf_print(buf, "%d\n", BUF_LENGTH(buf));
+
+	logger(sysdata->logging, 1, "%s", expbuf_string(buf));
+	expbuf_clear(buf);
+
+	// return the buffer to the pool.
+	expbuf_pool_return(sysdata->bufpool, buf);
 }
 
 void sigusr1_handler(evutil_socket_t fd, short what, void *arg)

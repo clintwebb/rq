@@ -61,5 +61,7 @@ void      queue_deliver(queue_t *queue);
 // void      queue_notify(queue_t *queue, void *server);
 void      queue_msg_done(queue_t *queue, node_t *node);
 
+void      queue_dump(queue_t *queue, expbuf_t *buf);
+
 #endif
 
