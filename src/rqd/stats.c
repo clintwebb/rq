@@ -41,7 +41,6 @@ static void stats_handler(int fd, short int flags, void *arg)
 	int clients;
 	int queues;
 	int msg_pending, msg_proc;
-// 	server_t *server;
 	queue_t *q;
 	void *n;
 
@@ -78,18 +77,17 @@ static void stats_handler(int fd, short int flags, void *arg)
 	assert(stats != NULL);
 	if (stats->in_bytes || stats->out_bytes || stats->requests || stats->replies || stats->broadcasts || stats->re || stats->we) {
 
-		if (sysdata->verbose)
-			logger(sysdata->logging, 1, "Bytes[%u/%u], Clients[%u], Requests[%u], Replies[%u], Broadcasts[%u], Queues[%u], Msgs[%d/%d], MsgPool[%u/%u], Events[%u/%u/%u]",
-				stats->in_bytes,
-				stats->out_bytes,
-				clients,
-				stats->requests,
-				stats->replies,
-				stats->broadcasts,
-				queues,
-				msg_pending, msg_proc,
-				mempool_active_count(sysdata->msgpool), mempool_inactive_count(sysdata->msgpool),
-				stats->re, stats->we, stats->te);
+		logger(sysdata->logging, 1, "Bytes[%u/%u], Clients[%u], Requests[%u], Replies[%u], Broadcasts[%u], Queues[%u], Msgs[%d/%d], MsgPool[%u/%u], Events[%u/%u/%u]",
+			stats->in_bytes,
+			stats->out_bytes,
+			clients,
+			stats->requests,
+			stats->replies,
+			stats->broadcasts,
+			queues,
+			msg_pending, msg_proc,
+			mempool_active_count(sysdata->msgpool), mempool_inactive_count(sysdata->msgpool),
+			stats->re, stats->we, stats->te);
 		
 		stats->in_bytes = 0;
 		stats->out_bytes = 0;

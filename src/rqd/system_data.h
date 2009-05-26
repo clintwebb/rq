@@ -25,9 +25,7 @@ typedef struct {
 	struct event *sighup_event;
 	struct event *sigusr1_event;
 	struct event *sigusr2_event;
-	struct event *stats_event;
 
-	int verbose;
 	settings_t *settings;
 	stats_t *stats;
 	list_t *queues;

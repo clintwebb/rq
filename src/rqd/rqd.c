@@ -131,7 +131,6 @@ static void init_sysdata(system_data_t *sysdata)
 	
 	sysdata->evbase        = NULL;
 	sysdata->bufpool       = NULL;
-	sysdata->verbose       = 0;
 	sysdata->settings      = NULL;
 	sysdata->servers       = NULL;
 	sysdata->stats         = NULL;
@@ -142,10 +141,8 @@ static void init_sysdata(system_data_t *sysdata)
 	sysdata->sigint_event  = NULL;
 	sysdata->sigusr1_event = NULL;
 	sysdata->sigusr2_event = NULL;
-
 	sysdata->nodelist      = NULL;
 	sysdata->controllers   = NULL;
-	sysdata->stats_event   = NULL;
 	sysdata->logging       = NULL;
 	sysdata->in_buf        = NULL;
 	sysdata->build_buf     = NULL;
@@ -165,9 +162,10 @@ static void cleanup_sysdata(system_data_t *sysdata)
 	assert(sysdata->msgpool == NULL);
 	assert(sysdata->sighup_event == NULL);
 	assert(sysdata->sigint_event == NULL);
+	assert(sysdata->sigusr1_event == NULL);
+	assert(sysdata->sigusr2_event == NULL);
 	assert(sysdata->nodelist == NULL);
 	assert(sysdata->controllers == NULL);
-	assert(sysdata->stats_event == NULL);
 	assert(sysdata->logging == NULL);
 	assert(sysdata->in_buf == NULL);
 	assert(sysdata->build_buf == NULL);
@@ -265,7 +263,7 @@ static void init_logging(system_data_t *sysdata)
 	assert(sysdata->evbase);
 	
 	sysdata->logging = (logging_t *) malloc(sizeof(logging_t));
-	log_init(sysdata->logging, sysdata->settings->logfile, sysdata->verbose);
+	log_init(sysdata->logging, sysdata->settings->logfile, sysdata->settings->verbose);
 	log_buffered(sysdata->logging, sysdata->evbase);
 }
 
@@ -587,7 +585,6 @@ int main(int argc, char **argv)
 	init_settings(&sysdata);
 
 	get_options(sysdata.settings, argc, argv);
-	sysdata.verbose = sysdata.settings->verbose;
 	
 	init_maxconns(&sysdata);
 	init_daemon(&sysdata);

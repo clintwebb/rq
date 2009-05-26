@@ -40,9 +40,7 @@ void cmdInvalid(void *base, void *data, risp_length_t len)
 
 	assert(node != NULL);
 	assert(node->sysdata != NULL);
-	assert(node->sysdata->verbose >= 0);
-	
-	logger(node->sysdata->logging, 1, 
+	logger(node->sysdata->logging, 1,
 		"Received invalid (%d)): [%d, %d, %d]", len, cast[0], cast[1], cast[2]);
 		
 	assert(0);
@@ -62,7 +60,6 @@ void cmdClear(void *base)
 	data_clear(&node->data);
  	
  	assert(node->sysdata != NULL);
-	assert(node->sysdata->verbose >= 0);
 	logger(node->sysdata->logging, 3, "node:%d CLEAR", node->handle);
 }
 
@@ -118,9 +115,8 @@ void cmdRequest(void *base)
  	// set our specific flag.
 	BIT_SET(node->data.flags, DATA_FLAG_REQUEST);
 
-	assert(node->sysdata != NULL);
-	assert(node->sysdata->verbose >= 0);
-	logger(node->sysdata->logging, 3, 
+	assert(node->sysdata);
+	logger(node->sysdata->logging, 3,
 		"node:%d REQUEST (flags:%x, mask:%x)", node->handle, node->data.flags, node->data.mask);
 }
 
@@ -129,8 +125,6 @@ void cmdReply(void *base)
 {
 	node_t *node = (node_t *) base;
  	assert(node != NULL);
-	assert(node->sysdata != NULL);
-	assert(node->sysdata->verbose >= 0);
 
 	// a REPLY command should not have any other flags.
 	node->data.flags = DATA_FLAG_REPLY;
@@ -138,6 +132,7 @@ void cmdReply(void *base)
 	// ensure only the legal data is used.
 	node->data.mask &= (DATA_MASK_ID | DATA_MASK_PAYLOAD);
 
+	assert(node->sysdata);
 	logger(node->sysdata->logging, 3, 
 		"node:%d REPLY (flags:%x, mask:%x)", node->handle, node->data.flags, node->data.mask);
 }
@@ -145,9 +140,7 @@ void cmdReply(void *base)
 void cmdBroadcast(void *base)
 {
 	node_t *node = (node_t *) base;
- 	assert(node != NULL);
-	assert(node->sysdata != NULL);
-	assert(node->sysdata->verbose >= 0);
+ 	assert(node);
 
  	// ensure only the flags that are valid.
  	node->data.flags &= (DATA_FLAG_REQUEST | DATA_FLAG_NOREPLY);
@@ -157,9 +150,8 @@ void cmdBroadcast(void *base)
 	// ensure only the legal data is used.
 	node->data.mask &= (DATA_MASK_ID | DATA_MASK_TIMEOUT | DATA_MASK_QUEUEID | DATA_MASK_QUEUE | DATA_MASK_PAYLOAD);
 
-	assert(node->sysdata != NULL);
-	assert(node->sysdata->verbose >= 0);
-	logger(node->sysdata->logging, 3, 
+	assert(node->sysdata);
+	logger(node->sysdata->logging, 3,
 		"node:%d BROADCAST (flags:%x, mask:%x)",
 		node->handle, node->data.flags, node->data.mask);
 }
@@ -168,7 +160,7 @@ void cmdNoReply(void *base)
 {
 	node_t *node = (node_t *) base;
  	
- 	assert(node != NULL);
+ 	assert(node);
  	assert(node->handle >= 0);
 
  	// Clear any flags that are not compatible.
@@ -180,9 +172,8 @@ void cmdNoReply(void *base)
 	// ensure only the legal data is used.
 // 	BIT_CLEAR(node->data.mask, DATA_MASK_MAX);
 
-	assert(node->sysdata != NULL);
-	assert(node->sysdata->verbose >= 0);
-	logger(node->sysdata->logging, 3, 
+	assert(node->sysdata);
+	logger(node->sysdata->logging, 3,
 		"node:%d NOREPLY (flags:%x, mask:%x)",
 		node->handle, node->data.flags, node->data.mask);
 }
@@ -191,9 +182,7 @@ void cmdNoReply(void *base)
 void cmdExclusive(void *base)
 {
 	node_t *node = (node_t *) base;
- 	assert(node != NULL);
-	assert(node->sysdata != NULL);
-	assert(node->sysdata->verbose >= 0);
+ 	assert(node);
 
  	// ensure only the flags that are valid.
  	node->data.flags &= (DATA_FLAG_CONSUME);
@@ -202,9 +191,8 @@ void cmdExclusive(void *base)
 	// ensure only the legal data is used.
 	node->data.mask &= ( DATA_MASK_QUEUE | DATA_MASK_MAX | DATA_MASK_PRIORITY);
 
-	assert(node->sysdata != NULL);
-	assert(node->sysdata->verbose >= 0);
-	logger(node->sysdata->logging, 3, 
+	assert(node->sysdata);
+	logger(node->sysdata->logging, 3,
 		"node:%d EXCLUSIVE (flags:%x, mask:%x)",
 		node->handle, node->data.flags, node->data.mask);
 }
@@ -213,9 +201,7 @@ void cmdExclusive(void *base)
 void cmdClosing(void *base)
 {
 	node_t *node = (node_t *) base;
- 	assert(node != NULL);
-	assert(node->sysdata != NULL);
-	assert(node->sysdata->verbose >= 0);
+ 	assert(node);
 
  	// ensure only the flags that are valid.
  	BIT_CLEAR(node->data.flags, DATA_FLAG_CONSUME);
@@ -225,9 +211,8 @@ void cmdClosing(void *base)
  	// set our specific flag.
 	BIT_SET(node->data.flags, DATA_FLAG_CLOSING);
 	
-	assert(node->sysdata != NULL);
-	assert(node->sysdata->verbose >= 0);
-	logger(node->sysdata->logging, 3, 
+	assert(node->sysdata);
+	logger(node->sysdata->logging, 3,
 		"node:%d CLOSING (flags:%x, mask:%x)",
 		node->handle, node->data.flags, node->data.mask);
 }
@@ -274,16 +259,15 @@ void cmdId(void *base, risp_int_t value)
 {
 	node_t *node= (node_t *) base;
 
- 	assert(node != NULL);
+ 	assert(node);
  	assert(value > 0);
  	assert(node->handle >= 0);
 
 	BIT_SET(node->data.mask, DATA_MASK_ID);
 	node->data.id = value;
 	
-	assert(node->sysdata != NULL);
-	assert(node->sysdata->verbose >= 0);
-	logger(node->sysdata->logging, 3, 
+	assert(node->sysdata);
+	logger(node->sysdata->logging, 3,
 		"node:%d ID (%d) (flags:%x, mask:%x)",
 		node->handle, value, node->data.flags, node->data.mask);
 }
@@ -296,7 +280,7 @@ void cmdQueueID(void *base, risp_int_t value)
 	node->data.qid = value;
 	BIT_SET(node->data.mask, DATA_MASK_QUEUEID);
 
-	assert(node->sysdata != NULL);
+	assert(node->sysdata);
 	logger(node->sysdata->logging, 3, 
 		"node:%d QUEUEID (%d)", node->handle, value);
 }
@@ -429,12 +413,10 @@ void cmdDelivered(void *base)
 void cmdExecute(void *base) 
 {
 	node_t *node = (node_t *) base;
- 	assert(node != NULL);
-	assert(node->sysdata != NULL);
-	assert(node->sysdata->verbose >= 0);
+ 	assert(node);
+	assert(node->sysdata);
 	
- 	assert(node->sysdata->stats != NULL);
-	logger(node->sysdata->logging, 3, 
+	logger(node->sysdata->logging, 3,
 		"node:%d EXECUTE (flags:%X, mask:%X)",
 		node->handle, node->data.flags, node->data.mask);
 

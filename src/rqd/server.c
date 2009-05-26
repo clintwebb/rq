@@ -92,8 +92,6 @@ static void server_event_handler(int hid, short flags, void *data)
   server = (server_t *) data;
 	assert(server != NULL);
 	assert(server->sysdata != NULL);
-	assert(server->sysdata->verbose >= 0);
-
 
 	addrlen = sizeof(addr);
 	sfd = accept(hid, (struct sockaddr *)&addr, &addrlen);
@@ -101,8 +99,8 @@ static void server_event_handler(int hid, short flags, void *data)
 		if (errno == EAGAIN || errno == EWOULDBLOCK) {
 				/* these are transient, so don't log anything */
 		} else if (errno == EMFILE) {
-			if (server->sysdata->verbose > 0)
-					fprintf(stderr, "Too many open connections\n");
+			fprintf(stderr, "Too many open connections\n");
+			assert(0);
 		} else {
 			perror("accept()");
 		}

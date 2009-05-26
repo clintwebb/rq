@@ -133,7 +133,6 @@ void processConsume(node_t *node)
 	
 	assert(node);
 	assert(node->sysdata);
-	assert(node->sysdata->verbose >= 0);
 	assert(BIT_TEST(node->data.flags, DATA_FLAG_CONSUME));
 	
 	// make sure that we have the minimum information that we need.
