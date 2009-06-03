@@ -28,6 +28,23 @@ install: librq.so.1.0.1 rq.h
 	ldconfig
 	@echo "Install complete."
 
+
+uninstall: /usr/include/rq.h /usr/lib/librq.so.1.0.1
+	rm /usr/include/rq.h
+	rm /usr/lib/librq.so.1.0.1
+	rm /usr/lib/librq.so.1
+	rm /usr/lib/librq.so
+	
+
+man-pages: manpages/librq.3
+	@mkdir tmp.install
+	@cp manpages/* tmp.install/
+	@gzip tmp.install/*.3
+	cp tmp.install/*.3.gz $(MANPATH)/man3/
+	@rm -r tmp.install	
+	@echo "Man-pages Install complete."
+
+
 clean:
 	@-[ -e librq.o ] && rm librq.o
 	@-[ -e librq.so* ] && rm librq.so*

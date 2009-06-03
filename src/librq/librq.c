@@ -223,11 +223,26 @@ void rq_conn_closed(rq_conn_t *conn)
 {
 	assert(conn);
 
+	assert(conn->rq);
+	assert(conn->rq->bufpool);
+
 	// free all the buffers.
-	expbuf_free(&conn->readbuf);
-	expbuf_free(&conn->in);
-	expbuf_free(&conn->out);
-	expbuf_free(&conn->build);
+	assert(conn->readbuf);
+	assert(BUF_LENGTH(conn->readbuf) == 0);
+	expbuf_pool_return(conn->rq->bufpool, conn->readbuf);
+	conn->readbuf = NULL;
+
+	if (conn->in) {
+		expbuf_clear(conn->in);
+		expbuf_pool_return(conn->rq->bufpool, conn->in);
+		conn->in = NULL;
+	}
+	
+	if (conn->out) {
+		expbuf_clear(conn->out);
+		expbuf_pool_return(conn->rq->bufpool, conn->out);
+		conn->out = NULL;
+	}
 
 	// cleanup the data structure.
 	rq_data_free(&conn->data);
@@ -246,9 +261,21 @@ void rq_conn_closed(rq_conn_t *conn)
 	// clear the 'messages' linked list.
 	assert(0);
 
+	assert(conn->connect_event == NULL);
+
 	// free the conn object.
 	assert(0);
 	
+}
+
+
+//-----------------------------------------------------------------------------
+// Used to tell the library that it needs to start shutting down connections so that the application can exit the loop.
+void rq_shutdown(rq_t *rq)
+{
+	assert(rq);
+
+	assert(0);
 }
 
 
@@ -277,6 +304,18 @@ void rq_cleanup(rq_t *rq)
 		rq_queue_free(q);
 		free(q);
 	}
+
+	// cleanup the msgpool
+	assert(rq->msgpool);
+	mempool_free(rq->msgpool);
+	free(rq->msgpool);
+	rq->msgpool = NULL;
+
+	assert(rq->bufpool);
+	expbuf_pool_free(rq->bufpool);
+	free(rq->bufpool);
+	rq->bufpool = NULL;
+
 }
 
 
@@ -289,79 +328,9 @@ void rq_setevbase(rq_t *rq, struct event_base *base)
 	rq->evbase = base;
 }
 
-// Handle the timeout event, and call the user's handler.
-void rq_timeout_handler(int fd, short flags, void *ptr)
-{
-	rq_timeout_t *timeout;
-
-	assert(fd == -1);
-//	assert(flags == 0);
-	assert(ptr != NULL);
-
-	timeout = ptr;
-	
-	assert(timeout != NULL);
-	assert(timeout->handler != NULL);
-	assert(timeout->clockevent.ev_base != NULL);
-
-	void (*func)(void *arg) = NULL;
-
-	evtimer_del(&timeout->clockevent);
-	func = timeout->handler;
-	func(timeout->arg);
-
-	free(timeout);	
-}
 
 
-//-----------------------------------------------------------------------------
-// Sets a timeout events onto the event queue it will only fire one time, so if
-// you want it to occur frequently then the event needs to be created each
-// time.  Once the timeout is set, you cannot cancel it.  If you dont want
-// something processed, you need to handle it yourself.
-//
-// We do not want to limit the number of timeouts that can occur.  So we need
-// to create dynamic event structures.  We dont want to manage a list of those
-// event structures as that becomes complicated.  So instead, when we create a
-// timer, we build an event structure, and give it the pointer to the arg and
-// handler that was specified, and then we pass a pointer to our new structure
-// to the event loop.  When the timeout occurs, our internal handler picks it
-// up, pulls out the real handler and arg, and then passes control to them.
-void rq_settimeout(rq_t *rq, unsigned int msecs, void (*handler)(void *arg), void *arg)
-{
-	rq_timeout_t *tptr;
-	struct timeval t = {.tv_sec = 1, .tv_usec = 0};
 
-	assert(rq != NULL);
-	assert(msecs > 0);
-	assert(handler != NULL);
-
-	// since 1 second timers are the most common that will be the default,
-	// anything else and we will calculate it, which is slower.
-	if (msecs != 1000) {
-		if (msecs >= 1000) {
-			t.tv_sec = msecs / 1000;
-			t.tv_usec = (msecs % 1000) * 1000;
-		}
-		else {
-			t.tv_sec = 0;
-			t.tv_usec = msecs * 1000;
-		}
-	}
-
-	// rq object needs to be added to the event system before a timeout can be set.
-	assert(rq->evbase != NULL);
-
-	tptr = (rq_timeout_t *) malloc(sizeof(rq_timeout_t));
-	assert(tptr != NULL);
-	tptr->handler = handler;
-	tptr->arg = arg;
-
-  evtimer_set(&tptr->clockevent, rq_timeout_handler, (void *)tptr);
-  event_base_set(rq->evbase, &tptr->clockevent);
-  evtimer_add(&tptr->clockevent, &t);
-	assert(tptr->clockevent.ev_base == rq->evbase);
-}
 
 
 // this function is an internal one taht is used to read data from the socket.
@@ -374,55 +343,70 @@ static void rq_process_read(rq_conn_t *conn)
 	assert(conn);
 	assert(conn->rq);
 	assert(conn->risp);
+	assert(conn->readbuf);
 	
-	assert(conn->readbuf.length == 0);
-	assert(conn->readbuf.max >= RQ_DEFAULT_BUFFSIZE);
+	assert(BUF_LENGTH(conn->readbuf) == 0);
+	assert(BUF_MAX(conn->readbuf) >= RQ_DEFAULT_BUFFSIZE);
 
 	empty = 0;
 	while (empty == 0) {
-		assert(conn->readbuf.length == 0);
+		assert(BUF_LENGTH(conn->readbuf) == 0);
 		assert(conn->handle != INVALID_HANDLE && conn->handle > 0);
-		assert(conn->readbuf.data != NULL  && conn->readbuf.max > 0);
+		assert(BUF_DATA(conn->readbuf) != NULL  && BUF_MAX(conn->readbuf) > 0);
 		
-		res = read(conn->handle, conn->readbuf.data, conn->readbuf.max);
+		res = read(conn->handle, BUF_DATA(conn->readbuf), BUF_MAX(conn->readbuf));
 		if (res > 0) {
-			conn->readbuf.length = res;
-			assert(conn->readbuf.length <= conn->readbuf.max);
+			BUF_LENGTH(conn->readbuf) = res;
+			assert(BUF_LENGTH(conn->readbuf) <= BUF_MAX(conn->readbuf));
 
 			// if we pulled out the max we had avail in our buffer, that means we
-			// can pull out more at a time, so we should increase our buffer size.
-			if (res == conn->readbuf.max) {
-				expbuf_shrink(&conn->readbuf, conn->readbuf.max + RQ_DEFAULT_BUFFSIZE);
+			// can pull out more at a time, so we should increase our buffer size by
+			// RQ_DEFAULT_BUFFSIZE amount.  This will increase the size of the
+			// buffer in rather small chunks, which might not be optimal.
+			if (res == BUF_MAX(conn->readbuf)) {
+				expbuf_shrink(conn->readbuf, RQ_DEFAULT_BUFFSIZE);
 				assert(empty == 0);
 			}
 			else { empty = 1; }
 			
 			// if there is no data in the in-buffer, then we will process the common buffer by itself.
-			if (conn->in.length == 0) {
-				res = risp_process(conn->risp, conn, conn->readbuf.length, (unsigned char *) conn->readbuf.data);
-				assert(res <= conn->readbuf.length);
+			if (conn->in == NULL) {
+				res = risp_process(conn->risp, conn, BUF_LENGTH(conn->readbuf), (unsigned char *) BUF_DATA(conn->readbuf));
+				assert(res <= BUF_LENGTH(conn->readbuf));
 				assert(res >= 0);
-				if (res > 0) { expbuf_purge(&conn->readbuf, res); }
+				if (res > 0) { expbuf_purge(conn->readbuf, res); }
 
 				// if there is data left over, then we need to add it to our in-buffer.
-				if (conn->readbuf.length > 0) {
-					expbuf_add(&conn->in, conn->readbuf.data, conn->readbuf.length);
-					expbuf_clear(&conn->readbuf);
+				if (BUF_LENGTH(conn->readbuf) > 0) {
+					if (conn->in == NULL) {
+						conn->in = expbuf_pool_new(conn->rq->bufpool, BUF_LENGTH(conn->readbuf));
+						assert(conn->in);
+					}
+					expbuf_add(conn->in, BUF_DATA(conn->readbuf), BUF_LENGTH(conn->readbuf));
+					expbuf_clear(conn->readbuf);
 				}
 			}
 			else {
 				// we have data left in the in-buffer, so we add the content of the common buffer
-				assert(conn->readbuf.length > 0);
-				expbuf_add(&conn->in, conn->readbuf.data, conn->readbuf.length);
-				expbuf_clear(&conn->readbuf);
-				assert(conn->readbuf.length == 0);
-				assert(conn->in.length > 0 && conn->in.data != NULL);
+				assert(BUF_LENGTH(conn->readbuf) > 0);
+				assert(conn->in);
+				assert(BUF_LENGTH(conn->in) > 0);
+				expbuf_add(conn->in, BUF_DATA(conn->readbuf), BUF_LENGTH(conn->readbuf));
+				expbuf_clear(conn->readbuf);
+				assert(BUF_LENGTH(conn->readbuf) == 0);
+				assert(BUF_LENGTH(conn->in) > 0 && BUF_DATA(conn->in) != NULL);
 
 				// and then process what is there.
-				res = risp_process(conn->risp, conn, conn->in.length, (unsigned char *) conn->in.data);
-				assert(res <= conn->in.length);
+				res = risp_process(conn->risp, conn, BUF_LENGTH(conn->in), (unsigned char *) BUF_DATA(conn->in));
+				assert(res <= BUF_LENGTH(conn->in));
 				assert(res >= 0);
-				if (res > 0) { expbuf_purge(&conn->in, res); }
+				if (res > 0) { expbuf_purge(conn->in, res); }
+
+				if (BUF_LENGTH(conn->in) == 0) {
+					// the in buffer is now empty, so we should return it to the pool.
+					expbuf_pool_return(conn->rq->bufpool, conn->in);
+					conn->in = NULL;
+				}
 			}
 		}
 		else {
@@ -442,7 +426,7 @@ static void rq_process_read(rq_conn_t *conn)
 		}
 	}
 	
-	assert(conn->readbuf.length == 0);
+	assert(BUF_LENGTH(conn->readbuf) == 0);
 }
 
 static void rq_write_handler(int fd, short int flags, void *arg)
@@ -462,11 +446,9 @@ static void rq_write_handler(int fd, short int flags, void *arg)
 	assert(0);
 
 	// if we dont have any more to send, then we need to remove the WRITE event.
-	if (conn->out.length == 0) {
-		if (event_del(conn->write_event) != -1) {
-			event_free(conn->write_event);
-			conn->write_event = NULL;
-		}
+	if (BUF_LENGTH(conn->out) == 0) {
+		event_free(conn->write_event);
+		conn->write_event = NULL;
 	}
 }
 
@@ -489,7 +471,7 @@ static void rq_senddata(rq_conn_t *conn, char *data, int length)
 	assert(conn->handle != INVALID_HANDLE);
 
 	// if the out buffer is empty, then we will try and send what we've got straight away.
-	if (conn->status == active && conn->out.length == 0) {
+	if (conn->status == active && conn->out == NULL) {
 		res = send(conn->handle, data, length, 0);
 		if (res > 0) {
 			assert(res <= length);
@@ -509,7 +491,16 @@ static void rq_senddata(rq_conn_t *conn, char *data, int length)
 	if (res < length && conn->handle != INVALID_HANDLE) {
 		// there is already data in the out queue...
 		if (res < 0) { res = 0; }
-		expbuf_add(&conn->out, data+res, length-res);
+
+		if (conn->out == NULL) {
+			assert(conn->rq);
+			assert(conn->rq->bufpool);
+			conn->out = expbuf_pool_new(conn->rq->bufpool, (length-res));
+			assert(conn->out);
+		}
+		
+		expbuf_add(conn->out, data+res, length-res);
+		assert(conn->rq->evbase);
 		assert(conn->read_event);
 		assert(conn->write_event == NULL);
 		conn->write_event = event_new(conn->rq->evbase, conn->handle, EV_WRITE | EV_PERSIST, rq_write_handler, conn);
@@ -530,26 +521,35 @@ err:
 // This internal function is used to actually send a queue consume request 
 static void rq_send_consume(rq_conn_t *conn, rq_queue_t *queue)
 {
+	expbuf_t *buf;
+	
 	assert(conn);
 	assert(queue);
 
 	assert(queue->queue);
 	assert(queue->max >= 0);
+	assert(strlen(queue->queue) > 0 && strlen(queue->queue) < 256);
+
+	// get a buffer from the bufpool.
+	assert(conn->rq);
+	assert(conn->rq->bufpool);
+	buf = expbuf_pool_new(conn->rq->bufpool, 32);
 
 	// send consume request to controller.
-	addCmd(&conn->build, RQ_CMD_CLEAR);
-	addCmd(&conn->build, RQ_CMD_CONSUME);
+	addCmd(buf, RQ_CMD_CLEAR);
+	addCmd(buf, RQ_CMD_CONSUME);
 	if (queue->exclusive != 0)
-		addCmd(&conn->build, RQ_CMD_EXCLUSIVE);
-	addCmdShortStr(&conn->build, RQ_CMD_QUEUE, strlen(queue->queue), queue->queue);
-	addCmdInt(&conn->build, RQ_CMD_MAX, queue->max);
-	addCmdShortInt(&conn->build, RQ_CMD_PRIORITY, queue->priority);
-	addCmd(&conn->build, RQ_CMD_EXECUTE);
+		addCmd(buf, RQ_CMD_EXCLUSIVE);
+	addCmdShortStr(buf, RQ_CMD_QUEUE, strlen(queue->queue), queue->queue);
+	addCmdInt(buf, RQ_CMD_MAX, queue->max);
+	addCmdShortInt(buf, RQ_CMD_PRIORITY, queue->priority);
+	addCmd(buf, RQ_CMD_EXECUTE);
 
-	rq_senddata(conn, conn->build.data, conn->build.length);
-	expbuf_clear(&conn->build);
+	rq_senddata(conn, BUF_DATA(buf), BUF_LENGTH(buf));
+	expbuf_clear(buf);
 	
-	assert(conn->build.length == 0);
+	// return the buffer to the bufpool.
+	expbuf_pool_return(conn->rq->bufpool, buf);
 }
 
 
@@ -597,9 +597,10 @@ static void rq_connect_handler(int fd, short int flags, void *arg)
 	event_add(conn->read_event, NULL);
 
 	// if we have data in our out buffer, we need to create the WRITE event.
-	if (conn->out.length > 0) {
+	if (BUF_LENGTH(conn->out) > 0) {
 		assert(conn->handle != INVALID_HANDLE && conn->handle > 0);
 		assert(conn->write_event == NULL);
+		assert(conn->rq->evbase);
 		conn->write_event = event_new(conn->rq->evbase, conn->handle, EV_WRITE | EV_PERSIST, rq_write_handler, conn);
 		event_add(conn->write_event, NULL);
 	}
@@ -627,13 +628,15 @@ static void rq_connect_handler(int fd, short int flags, void *arg)
 // non-blocking mode.
 static void rq_connect(rq_t *rq)
 {
-	int sock;
+	evutil_socket_t sock;
 	rq_conn_t *conn, *first;
 	int i, j;
-	struct sockaddr_in sin;
+	struct sockaddr saddr;
+// 	struct sockaddr_in sin;
 	unsigned long ulAddress;
 	struct hostent *hp;
 	int result;
+	int len;
 
 	assert(rq != NULL);
 
@@ -647,85 +650,36 @@ static void rq_connect(rq_t *rq)
 
 		assert(conn->hostname != NULL);
 		assert(conn->hostname[0] != '\0');
-		assert(conn->port > 0);
 		assert(conn->read_event == NULL);
 		assert(conn->write_event == NULL);
 
-		// if the hostname hasn't been resolved, then resolve it.
-		if (conn->resolved[0] == 0) {
-			// Look up by standard notation (xxx.xxx.xxx.xxx) first.
-			ulAddress = inet_addr(conn->hostname);
-			if ( ulAddress != (unsigned long)(-1) )  {
-				conn->resolved[0] = ulAddress;
-			}
-			else {
-				// If that didn't work, try to resolve host name by DNS.
-				hp = gethostbyname(conn->hostname);
-				if( hp != NULL ) {
-					for (j=0; j<5 && j< hp->h_length; j++) {
-						conn->resolved[j] = hp->h_addr[j];
-					}
-					assert((j>=5) || (conn->resolved[j] == 0) );
-				}
-			}
+		len = sizeof(saddr);
+		if (evutil_parse_sockaddr_port(conn->hostname, &saddr, &len) != 0) {
+			// unable to parse the detail.  What do we need to do?
+			assert(0);
 		}
-
-		// if the hostname was resolved, then create the socket, bind and connect.
-		if (conn->resolved[0] != 0) {
-
-			sin.sin_family = AF_INET;
-			sin.sin_port = htons(conn->port);
-
-			for (j=0; j<5 && result < 0 && conn->resolved[j] != 0; j++) {
-
-				sin.sin_addr.s_addr = conn->resolved[j];
-
-        sock = socket(AF_INET,SOCK_STREAM,0);
-        if (sock >= 0) {
-					
-					// Before we attempt to connect, set the socket to non-blocking mode.
-					evutil_make_socket_nonblocking(sock);
-
-					result = connect(sock, (struct sockaddr*)&sin, sizeof(struct sockaddr));
-					if (result < 0 && errno == EINPROGRESS) {
-
-						result = 0;
-						conn->handle = sock;
-						conn->status = connecting;
-
-						// setup the event handler.
-						assert(rq->evbase);
-						assert(conn->handle != INVALID_HANDLE && conn->handle > 0);
-						assert(conn->read_event == NULL);
-						assert(conn->write_event == NULL);
-						
-						conn->read_event = event_new(rq->evbase, conn->handle, (EV_WRITE | EV_PERSIST), rq_connect_handler, conn);
-						event_add(conn->read_event, NULL);
-					}
-					else {
-						close(sock);
-						sock = 0;
-						assert(result == -1);
-						
-					}
-				}
-			}
-
-			// if we dont have a connection...
-			if (result < 0) {
-				// connection failed.
-				
-				// Need to pop this connection from the top of the list and add it to the bottom.
-				conn = ll_pop_head(&rq->connlist);
-				ll_push_tail(&rq->connlist, conn);
-
-				// and now get the next one from the list.
-				conn = ll_get_head(&rq->connlist);
+		else {
+			sock = socket(AF_INET,SOCK_STREAM,0);
+			assert(sock >= 0);
+							
+			// Before we attempt to connect, set the socket to non-blocking mode.
+			evutil_make_socket_nonblocking(sock);
 	
-				// if we get a conn that is the same as the first one we tried, then we need to exit with a failure.
-				if (conn == first)
-					conn = NULL;
-			}
+			conn->handle = sock;
+			conn->status = connecting;
+	
+			result = connect(sock, &saddr, sizeof(saddr));
+			assert(result < 0);
+			assert(errno == EINPROGRESS);
+	
+			// connect process has been started.  Now we need to create an event so that we know when the connect has completed.
+			assert(conn->connect_event == NULL);
+			assert(conn->read_event == NULL);
+			assert(conn->write_event == NULL);
+			assert(conn->rq);
+			assert(conn->rq->evbase);
+			conn->connect_event = event_new(conn->rq->evbase, sock, EV_WRITE, rq_connect_handler, conn);
+			event_add(conn->connect_event, NULL);
 		}
 	}
 }
@@ -736,33 +690,31 @@ static void rq_connect(rq_t *rq)
 // add a controller to the end of the connection list.   If this is the first
 // controller, then we need to attempt to connect to it, and setup the socket
 // on the event queue.
-void rq_addcontroller(rq_t *rq, char *host, int port)
+void rq_addcontroller(rq_t *rq, char *host)
 {
 	rq_conn_t *conn;
 	int j;
 	
 	assert(rq != NULL);
-	assert(host != NULL && port > 0);
+	assert(host != NULL);
 	assert(host[0] != '\0');
 	
 	conn = (rq_conn_t *) malloc(sizeof(rq_conn_t));
 	assert(conn);
 	
-	conn->hostname = host;
-	conn->port = port;
-	for(j=0; j<5; j++) {
-		conn->resolved[j] = 0;
-	}
+	conn->hostname = strdup(host);
 
 	conn->handle = INVALID_HANDLE;		// socket handle to the connected controller.
 	conn->read_event = NULL;
 	conn->write_event = NULL;
+	conn->connect_event = NULL;
 
-	expbuf_init(&conn->readbuf, RQ_DEFAULT_BUFFSIZE);
-	expbuf_init(&conn->in, 0);
-	expbuf_init(&conn->out, 0);
-	expbuf_init(&conn->build, 0);
-
+	assert(rq->bufpool);
+	conn->readbuf = expbuf_pool_new(rq->bufpool, RQ_DEFAULT_BUFFSIZE);
+	
+	conn->in = NULL;
+	conn->out = NULL;
+	
 	rq_data_init(&conn->data);
 
 	assert(rq->risp);
@@ -850,8 +802,7 @@ void rq_consume(rq_t *rq, char *queue, int max, int priority, int exclusive, voi
 }
 
 
-
-// A request has been 
+// A request has been
 static void processRequest(rq_conn_t *conn)
 {
 	msg_id_t msgid;
@@ -860,8 +811,12 @@ static void processRequest(rq_conn_t *conn)
 	rq_queue_t *tmp, *queue;
 	void *next;
 	rq_message_t *msg;
+	expbuf_t *buf;
 	
 	assert(conn);
+
+	// strategy has changed, need to check that this is still valid.
+	assert(0);
 
 	// get the required data out of the data structure, and make sure that we have all we need.
 	assert(BIT_TEST(conn->data.flags, RQ_DATA_FLAG_REQUEST));
@@ -881,6 +836,7 @@ static void processRequest(rq_conn_t *conn)
 		assert((qname == NULL && qid > 0) || (qname && qid == 0));
 
 		// find the queue to handle this request.
+		// TODO: use a function call to do this.
 		queue = NULL;
 		next = ll_start(&conn->rq->queues);
 		tmp = ll_next(&conn->rq->queues, &next);
@@ -897,39 +853,40 @@ static void processRequest(rq_conn_t *conn)
 		}
 
 		if (queue == NULL) {
-			
-			// we dont seem to be consuming that queue... 
-			addCmd(&conn->build, RQ_CMD_CLEAR);
-			addCmd(&conn->build, RQ_CMD_UNDELIVERED);
-			addCmdLargeInt(&conn->build, RQ_CMD_ID, (short int)msgid);
-			addCmd(&conn->build, RQ_CMD_EXECUTE);
-			rq_senddata(conn, conn->build.data, conn->build.length);
-			expbuf_clear(&conn->build);
+			// we dont seem to be consuming that queue...
+			assert(conn->rq);
+			assert(conn->rq->bufpool);
+			buf = expbuf_pool_new(conn->rq->bufpool, 8);
+			assert(buf);
+			addCmd(buf, RQ_CMD_CLEAR);
+			addCmd(buf, RQ_CMD_UNDELIVERED);
+			addCmdLargeInt(buf, RQ_CMD_ID, (short int)msgid);
+			addCmd(buf, RQ_CMD_EXECUTE);
+			rq_senddata(conn, BUF_DATA(buf), BUF_LENGTH(buf));
+			expbuf_clear(buf);
+			expbuf_pool_return(conn->rq->bufpool, buf);
 		}
 		else {
 			// send a delivery message back to the controller.
-			addCmd(&conn->build, RQ_CMD_CLEAR);
-			addCmd(&conn->build, RQ_CMD_DELIVERED);
-			addCmdLargeInt(&conn->build, RQ_CMD_ID, (short int)msgid);
-			addCmd(&conn->build, RQ_CMD_EXECUTE);
-			rq_senddata(conn, conn->build.data, conn->build.length);
-			expbuf_clear(&conn->build);
+			assert(conn->rq);
+			assert(conn->rq->bufpool);
+			buf = expbuf_pool_new(conn->rq->bufpool, 8);
+			assert(buf);
+			addCmd(buf, RQ_CMD_CLEAR);
+			addCmd(buf, RQ_CMD_DELIVERED);
+			addCmdLargeInt(buf, RQ_CMD_ID, (short int)msgid);
+			addCmd(buf, RQ_CMD_EXECUTE);
+			rq_senddata(conn, BUF_DATA(buf), BUF_LENGTH(buf));
+			expbuf_clear(buf);
+			expbuf_pool_return(conn->rq->bufpool, buf);
 
-			// create a message structure.
-			msg = ll_get_tail(&conn->messages);
+			assert(conn->rq->msgpool);
+			msg = mempool_get(conn->rq->msgpool, sizeof(rq_message_t));
 			if (msg == NULL) {
 				// there is no message object in the list.  We need to create one.
 				msg = (rq_message_t *) malloc(sizeof(rq_message_t));
 				rq_message_init(msg);
-			}
-			else if (msg->id > 0) {
-				// the message at the tail, is in use, so we need to create one.
-				msg = (rq_message_t *) malloc(sizeof(rq_message_t));
-				rq_message_init(msg);
-			}
-			else {
-				// the message is ready to be used, so we need to pop it off.
-				msg = ll_pop_tail(&conn->messages);
+				mempool_assign(conn->rq->msgpool, msg, sizeof(rq_message_t));
 			}
 			assert(msg);
 			assert(msg->id == 0);
@@ -937,12 +894,12 @@ static void processRequest(rq_conn_t *conn)
 			// fill out the message details, and add it to the head of the messages list.
 			assert(queue && msgid > 0);
 			msg->queue = queue;
-			msg->type = RQ_TYPE_REQUEST;
 			msg->id = msgid;
 			if (BIT_TEST(conn->data.flags, RQ_DATA_FLAG_NOREPLY))
 				msg->noreply = 1;
 
-			expbuf_set(&msg->data, conn->data.payload.data, conn->data.payload.length);
+			assert(msg->data);
+			expbuf_set(msg->data, BUF_DATA(&conn->data.payload), BUF_LENGTH(&conn->data.payload));
 		
 			queue->handler(msg, queue->arg);
 
@@ -950,9 +907,9 @@ static void processRequest(rq_conn_t *conn)
 
 			// if the message was NOREPLY, then we dont need to reply, and we can clear the message.
 			if (msg->noreply == 1) {
-				rq_message_clear(msg);
+				rq_msg_clear(msg);
 				assert(msg->id == 0);
-				ll_push_tail(&conn->messages, msg);
+				mempool_return(conn->rq->msgpool, msg);
 			}
 			else {
 				// If the message type is now REPLY, then it means that we already have
@@ -960,8 +917,6 @@ static void processRequest(rq_conn_t *conn)
 				// would already have been done.
 				assert(0);
 			}
-
-
 		}
 	}
 	else {
@@ -1045,12 +1000,14 @@ static void cmdClear(void *ptr)
 static void cmdPing(void *ptr)
 {
 	rq_conn_t *conn = (rq_conn_t *) ptr;
+	char buf;
+	
 	assert(conn);
 
-	assert(conn->build.length == 0);
-	addCmd(&conn->build, RQ_CMD_PONG);
-	rq_senddata(conn, conn->build.data, conn->build.length);
-	expbuf_clear(&conn->build);
+	// since we only need to send one char, its a bit silly to get an expanding buffer for it... so we'll do this one slightly different.
+	buf = RQ_CMD_PONG;
+
+	rq_senddata(conn, &buf, 1);
 }
 
 
@@ -1412,6 +1369,12 @@ void rq_init(rq_t *rq)
 
 	ll_init(&rq->connlist);
 	ll_init(&rq->queues);
+
+	rq->msgpool = (mempool_t *) malloc(sizeof(mempool_t));
+	mempool_init(rq->msgpool);
+
+	rq->bufpool = (expbuf_pool_t *) malloc(sizeof(expbuf_pool_t));
+	expbuf_pool_init(rq->bufpool, 0);		// TODO: should we have a max to avoid having large buffers that are not necessary?
 }
 
 
@@ -1420,32 +1383,49 @@ void rq_init(rq_t *rq)
 //-----------------------------------------------------------------------------
 // Initialise a message struct.  Assumes that the struct is currently invalid.
 // Overwrites everything.
-void rq_message_init(rq_message_t *msg)
+rq_message_t * rq_msg_new(rq_t *rq)
 {
-	assert(msg != NULL);
+	rq_message_t *msg;
 	
+	assert(rq);
+	assert(rq->msgpool);
+
+	// need to get a message struct from the mempool.
+	msg = mempool_get(rq->msgpool, sizeof(rq_message_t));
+	if (msg == NULL) {
+		// there wasnt any messages available in the pool, so we need to create one, and add it.
+		msg = (rq_message_t *) malloc(sizeof(rq_message_t));
+		mempool_assign(rq->msgpool, msg, sizeof(rq_message_t));
+	}
+
+	assert(msg);
 	msg->queue = NULL;
-	msg->type = 0;
 	msg->id = 0;
 	msg->noreply = 0;
 
-	expbuf_init(&msg->data, 0);
+	assert(rq->bufpool);
+	msg->data = expbuf_pool_new(rq->bufpool, 0);
 }
 
 //-----------------------------------------------------------------------------
-// clean up the resources used by the message so that it can be used again.  We will not yet clean up the data buffer, because it can stay until the message list is actually destroyed on shutdown.
-void rq_message_clear(rq_message_t *msg)
+// clean up the resources used by the message so that it can be used again.  We
+// will not yet clean up the data buffer, because it can stay until the message
+// list is actually destroyed on shutdown.
+void rq_msg_clear(rq_message_t *msg)
 {
 	assert(msg != NULL);
 
 	msg->id = 0;
-	msg->type = 0;
+	msg->broadcast = 0;
 	msg->noreply = 0;
 	msg->queue = NULL;
+
+	assert(msg->data);
+	expbuf_clear(msg->data);
 }
 
 
-void rq_message_setqueue(rq_message_t *msg, char *queue)
+void rq_msg_setqueue(rq_message_t *msg, char *queue)
 {
 	assert(msg != NULL);
 	assert(queue != NULL);
@@ -1455,15 +1435,15 @@ void rq_message_setqueue(rq_message_t *msg, char *queue)
 }
 
 
-void rq_message_setbroadcast(rq_message_t *msg)
+void rq_msg_setbroadcast(rq_message_t *msg)
 {
 	assert(msg != NULL);
-	assert(msg->type == 0);
+	assert(msg->broadcast == 0);
 
-	msg->type = RQ_TYPE_BROADCAST;
+	msg->broadcast = 1;
 }
 
-void rq_message_setnoreply(rq_message_t *msg)
+void rq_msg_setnoreply(rq_message_t *msg)
 {
 	assert(msg != NULL);
 	assert(msg->noreply == 0);
@@ -1471,25 +1451,24 @@ void rq_message_setnoreply(rq_message_t *msg)
 }
 
 // This function expects a pointer to memory that it now controls.  When it is finished 
-void rq_message_setdata(rq_message_t *msg, int length, char *data)
+void rq_msg_setdata(rq_message_t *msg, int length, char *data)
 {
 	assert(msg != NULL);
 	assert(length > 0);
 	assert(data != NULL);
 
-	expbuf_set(&msg->data, data, length);
+	expbuf_set(msg->data, data, length);
 }
 
 // send a message to the controller.
-void rq_send(rq_t *rq, rq_message_t *msg)
+void rq_send(rq_t *rq, rq_message_t *msg, void (*handler)(rq_message_t *reply, void *arg), void *arg)
 {
-	assert(rq != NULL);
-	assert(msg != NULL);
+	assert(rq);
+	assert(msg);
 
-	if (msg->type == 0);
-		msg->type = RQ_TYPE_REQUEST;
-
-	assert(msg->data.length > 0);
+	assert((handler == NULL && arg == NULL) || (handler != NULL));
+	
+	assert(BUF_LENGTH(msg->data) > 0);
 
 	// if there is no data in the 'out' queue, then attempt to send the request to the socket.  Any that we are unable to send, should be added to teh out queue, and the WRITE event should be established.
 
@@ -1497,3 +1476,11 @@ void rq_send(rq_t *rq, rq_message_t *msg)
 }
 
 
+// This function is used to send a reply for a request.  The data being sent back should be placed in the data buffer.
+void rq_reply(rq_message_t *msg)
+{
+	assert(msg);
+	assert(msg->rq);
+
+	assert(0);
+}

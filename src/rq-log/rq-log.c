@@ -10,6 +10,7 @@
 // includes
 #include <assert.h>
 #include <event.h>
+#include <evlogging.h>
 #include <expbuf.h>
 #include <linklist.h>
 #include <risp.h>
@@ -35,15 +36,10 @@ typedef struct {
 	char *username;
 	char *pid_file;
 
-	// connections to the controllers.
-	char *primary;
-	char *secondary;
-	int priport;
-	int secport;
+	// controllers addresses.
+	list_t *controllers;
 
 	// unique settings.
-	char *path;
-	int threshold;
 	char *filename;
 	char *queue;
 	char *levelsqueue;
@@ -55,18 +51,22 @@ typedef struct {
 
 
 typedef struct {
-	rq_t               rq;
-	settings_t         settings;
+	struct event_base *evbase;
+	rq_t              *rq;
+	settings_t        *settings;
 	risp_t            *risp;
-	int                logfile;
-	int                modified;
-	
+	logging_t         *logging;
+
+	struct event *sigint_event;
+	struct event *sigusr1_event;
+	struct event *sigusr2_event;
+
 	// data received
-	risp_command_t  op;
+	risp_command_t op;
 	int filter;
 
 	unsigned int mask;
-	int level, time;
+	int level;
 	expbuf_t text;
 
 	rq_message_t *req;
@@ -75,9 +75,6 @@ typedef struct {
 
 
 
-//-----------------------------------------------------------------------------
-// Global variables.
-struct event_base *main_event_base = NULL;
 
 
 
@@ -85,15 +82,10 @@ struct event_base *main_event_base = NULL;
 // print some info to the user, so that they can know what the parameters do.
 void usage(void) {
 	printf(PACKAGE " " VERSION "\n");
-	printf("-p <path>     Path to store log files.\n");
-	printf("-t <num>      Filesize threshold (in mb).\n");
-	printf("-f <filename> Filename prefix.\n");
+	printf("-f <filename> Filename to log to.\n");
 	printf("-q <queue>    Queue to monitor.  Default: logger\n");
 	printf("\n");
-	printf("-a <ip_addr>  Controller to connect to.\n");
-	printf("-A <num>      Port to use when connecting to the other controller.\n");
-	printf("-b <ip_addr>  Backup Controller to connect to.\n");
-	printf("-B <num>      Port to use when connecting to the backup controller.\n");
+	printf("-c <ip:port>  Controller to connect to.\n");
 	printf("\n");
 	printf("-d            run as a daemon\n");
 	printf("-P <file>     save PID in <file>, only used with -d option\n");
@@ -110,17 +102,7 @@ void usage(void) {
 
 
 
-//-----------------------------------------------------------------------------
-// Handle the signal.  Any signal we receive can only mean that we need to exit.
-static void sig_handler(const int sig) {
-    printf("SIGINT handled.\n");
-    assert(main_event_base != NULL);
-    event_base_loopbreak(main_event_base);
-}
-
-
-
-// We've received a command to indicate 
+// We've received a command to indicate
 void processSetLevel(control_t *ptr)
 {
 	assert(ptr != NULL);
@@ -178,12 +160,10 @@ void cmdInvalid(control_t *ptr, void *data, risp_length_t len)
 // should be in a predictable state.
 void cmdClear(control_t *ptr) 
 {
- 	assert(ptr != NULL);
+ 	assert(ptr);
  	
 	ptr->op = LOG_CMD_NOP;
 	ptr->mask = 0;
- 	
- 	if (ptr->settings.verbose > 1) printf("node: CLEAR\n");
 }
 
 
@@ -194,8 +174,7 @@ void cmdClear(control_t *ptr)
 // this example.   
 void cmdExecute(control_t *ptr) 
 {
- 	assert(ptr != NULL);
-	if (ptr->settings.verbose > 1) printf("node: EXECUTE (%d)\n", ptr->op);
+ 	assert(ptr);
 
 	// here we check what the current operation is.
 	switch(ptr->op) {
@@ -217,172 +196,491 @@ void cmdExecute(control_t *ptr)
 
 void cmdSetLevel(control_t *ptr)
 {
- 	assert(ptr != NULL);
+ 	assert(ptr);
 	ptr->op = LOG_CMD_SETLEVEL;
-	if (ptr->settings.verbose > 1) printf("node: SETLEVEL\n");
 }
 
 void cmdLevel(control_t *ptr, risp_int_t value)
 {
- 	assert(ptr != NULL);
+ 	assert(ptr);
  	assert(value >= 0 && value < 256);
 
 	ptr->level = value;
 	BIT_SET(ptr->mask, LOG_DATA_MASK_LEVEL);
-	
-	if (ptr->settings.verbose > 1) printf("node: LEVEL %d\n", value);
-}
-
-void cmdTime(control_t *ptr, risp_int_t value)
-{
- 	assert(ptr != NULL);
-
-	ptr->time = value;
-	BIT_SET(ptr->mask, LOG_DATA_MASK_TIME);
-	
-	if (ptr->settings.verbose > 1) printf("node: TIME %d\n", value);
 }
 
 void cmdText(control_t *ptr, risp_length_t length, risp_char_t *data)
 {
-	assert(ptr != NULL);
+	assert(ptr);
 	assert(length > 0);
 	assert(data != NULL);
 	
 	expbuf_set(&ptr->text, data, length);
 	BIT_SET(ptr->mask, LOG_DATA_MASK_TEXT);
 	ptr->op = LOG_CMD_TEXT;
-	
-	if (ptr->settings.verbose > 1) printf("node: TEXT <%d>\n", length);
 }
 
 
-
-
-
-void settings_init(settings_t *ptr)
+//-----------------------------------------------------------------------------
+static void sigint_handler(evutil_socket_t fd, short what, void *arg)
 {
-	assert(ptr != NULL);
+ 	control_t *control = (control_t *) arg;
 
-	ptr->verbose = false;
-	ptr->daemonize = false;
-	ptr->username = NULL;
-	ptr->pid_file = NULL;
+	assert(fd < 0);
+	assert(arg);
 
-	ptr->primary = NULL;
-	ptr->priport = RQ_DEFAULT_PORT;
-	ptr->secondary = NULL;
-	ptr->secport = RQ_DEFAULT_PORT;
-	
-	ptr->path = NULL;
-	ptr->threshold = (25 * 1024 * 1024);
-	ptr->filename = NULL;
-	ptr->queue = NULL;
-	ptr->levelsqueue = NULL;
+	// need to initiate an RQ shutdown.
+	assert(control->rq);
+	rq_shutdown(control->rq);
+
+	// put logging system in direct mode (so that it no longer uses any events)
+	assert(control->logging);
+	log_direct(control->logging);
+
+	// delete the signal events.
+	assert(control->sigint_event);
+	event_free(control->sigint_event);
+	control->sigint_event = NULL;
+
+	assert(control->sigusr1_event);
+	event_free(control->sigusr1_event);
+	control->sigusr1_event = NULL;
+
+	assert(control->sigusr2_event);
+	event_free(control->sigusr2_event);
+	control->sigusr2_event = NULL;
 }
 
-void settings_cleanup(settings_t *ptr) 
+
+
+//-----------------------------------------------------------------------------
+// increase the log level.
+static void sigusr1_handler(evutil_socket_t fd, short what, void *arg)
 {
-	assert(ptr != NULL);
+// 	control_t *control = (control_t *) arg;
+
+	assert(fd < 0);
+	assert(arg);
+
+	// increase the log level.
+	assert(0);
+
+	// write a log entry to indicate the new log level.
+	assert(0);
 }
 
 
-static void timeout_handler(void *arg) {
+//-----------------------------------------------------------------------------
+// decrease the log level.
+static void sigusr2_handler(evutil_socket_t fd, short what, void *arg)
+{
+// 	control_t *control = (control_t *) arg;
 
-	control_t *ptr;
-	ptr = (control_t *) arg;
-	assert(ptr != NULL);
+	assert(fd < 0);
+	assert(arg);
 
-// 	printf("Timer timout\n");
+	// decrease the log level.
+	assert(0);
+
+	// write a log entry to indicate the new log level.
+	assert(0);
+}
+
+
+//-----------------------------------------------------------------------------
+// Handle the message that was sent over the queue.  the message itself uses
+// the RISP method, so we pass the data on to the risp processor.
+static void message_handler(rq_message_t *msg, void *arg)
+{
+	int processed;
+	control_t *control;
+
+	assert(msg);
 	
-	assert(ptr->modified >= 0);
-	if (ptr->modified > 0) {
-		if (ptr->logfile != INVALID_HANDLE) {
-			fsync(ptr->logfile);
-		}
-		ptr->modified = 0;
+	control = (control_t *) arg;
+	assert(control);
+	
+	assert(control->req == NULL);
+	control->req = msg;
+
+	assert(control->rq == msg->rq);
+
+	assert(control->risp);
+	assert(msg->data);
+	processed = risp_process(control->risp, control, BUF_LENGTH(msg->data), (risp_char_t *) BUF_DATA(msg->data));
+	assert(processed == BUF_LENGTH(msg->data));
+
+	if (msg->noreply == 0) {
+		// if we need to send a reply, we re-use the 'data' buffer.
+		expbuf_clear(msg->data);
+		rq_msg_addcmd(msg, RQ_CMD_NOP);
+		rq_reply(msg);
 	}
 
-	rq_settimeout(&ptr->rq, 1000, timeout_handler, ptr);
+	// is this correct?   
+	assert(0);
+
+	control->req = NULL;
 }
 
 
 
-void control_init(control_t *control)
+//-----------------------------------------------------------------------------
+// Create and init our controller object.   The  control object will have
+// everything in it that is needed to run this server.  It is in this object
+// because we need to pass a pointer to the handler that will be doing the work.
+static void init_control(control_t *control)
 {
 	assert(control != NULL);
 
-	settings_init(&control->settings);
 	control->risp = NULL;
-	control->logfile = INVALID_HANDLE;
-	control->modified = 0;
 
 	control->mask = 0;
 	expbuf_init(&control->text, 0);
-	
-	rq_init(&control->rq);
+
+	control->rq = NULL;
+	control->settings = NULL;
+	control->req = NULL;
+
+	control->sigint_event = NULL;
+	control->sigusr1_event = NULL;
+	control->sigusr2_event = NULL;
+
+	control->logging = NULL;
 }
 
-void control_cleanup(control_t *control)
+static void cleanup_control(control_t *control)
 {
 	assert(control != NULL);
-	if (control->logfile != INVALID_HANDLE) {
-		close(control->logfile);
-		control->logfile = INVALID_HANDLE;
-	}
+
+	assert(control->logging == NULL);
+	assert(control->settings == NULL);
+	assert(control->rq == NULL);
+	assert(control->req == NULL);
+	assert(control->sigint_event == NULL);
+	assert(control->sigusr1_event == NULL);
+	assert(control->sigusr2_event == NULL);
+	
 	expbuf_free(&control->text);
-	rq_cleanup(&control->rq);
-	settings_cleanup(&control->settings);
 }
+
+static void init_settings(control_t *control)
+{
+	assert(control);
+
+	assert(control->settings == NULL);
+
+	control->settings->verbose = 0;
+	control->settings->daemonize = false;
+	control->settings->username = NULL;
+	control->settings->pid_file = NULL;
+
+	control->settings->controllers = (list_t *) malloc(sizeof(list_t));
+	ll_init(control->settings->controllers);
+	
+	control->settings->filename = NULL;
+	control->settings->queue = NULL;
+	control->settings->levelsqueue = NULL;
+}
+
+static void cleanup_settings(control_t *control)
+{
+	assert(control);
+
+	assert(control->settings);
+
+	assert(control->settings->controllers);
+	assert(ll_count(control->settings->controllers) == 0);
+	ll_free(control->settings->controllers);
+	free(control->settings->controllers);
+	control->settings->controllers = NULL;
+
+	if (control->settings->filename) {
+		free(control->settings->filename);
+		control->settings->filename = NULL;
+	}
+
+	if (control->settings->queue) {
+		free(control->settings->queue);
+		control->settings->queue = NULL;
+	}
+
+	if (control->settings->levelsqueue) {
+		free(control->settings->levelsqueue);
+		control->settings->levelsqueue = NULL;
+	}
+
+	if (control->settings->username) {
+		free(control->settings->username);
+		control->settings->username = NULL;
+	}
+
+	if (control->settings->pid_file) {
+		free(control->settings->pid_file);
+		control->settings->pid_file = NULL;
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Check the settings that we have received and generate an error if we dont
+// have enough.
+static void check_settings(control_t *control)
+{
+	assert(control);
+	assert(control->settings);
+
+	// check that we have all our required settings.
+	if (ll_count(control->settings->controllers) == 0) {
+		fprintf(stderr, "Need at least one controller specified.\n");
+		exit(EXIT_FAILURE);
+	}
+	if (control->settings->filename == NULL) {
+		fprintf(stderr, "Need to specify a path for the log.\n");
+		exit(EXIT_FAILURE);
+	}
+	if (control->settings->queue == NULL) {
+		control->settings->queue = strdup("logger");
+	}
+}
+
+//-----------------------------------------------------------------------------
+// If we need to run as a daemon, then do so, dropping privs to a specific
+// username if it was specified, and creating a pid file, if that was
+// specified.
+static void init_daemon(control_t *control)
+{
+	assert(control);
+	assert(control->settings);
+
+	if (control->settings->daemonize) {
+		if (rq_daemon(control->settings->username, control->settings->pid_file, control->settings->verbose) != 0) {
+			fprintf(stderr, "failed to daemon() in order to daemonize\n");
+			exit(EXIT_FAILURE);
+		}
+	}
+}
+	
+// remove the PID file if we're a daemon
+static void cleanup_daemon(control_t *control)
+{
+	assert(control);
+	assert(control->settings);
+	
+	if (control->settings->daemonize && control->settings->pid_file) {
+		assert(control->settings->pid_file[0] != 0);
+		unlink(control->settings->pid_file);
+	}
+}
+
+static void init_events(control_t *control)
+{
+	assert(control->evbase == NULL);
+	control->evbase = event_base_new();
+	assert(control->evbase);
+	rq_setevbase(control->rq, control->evbase);
+}
+
+static void cleanup_events(control_t *control)
+{
+	assert(control);
+	assert(control->evbase);
+
+	event_base_free(control->evbase);
+	control->evbase = NULL;
+}
+
+
+static void init_rq(control_t *control)
+{
+	assert(control);
+	assert(control->rq == NULL);
+
+	control->rq = (rq_t *) malloc(sizeof(rq_t));
+	rq_init(control->rq);	
+}
+
+static void cleanup_rq(control_t *control)
+{
+	assert(control);
+	assert(control->rq);
+
+	rq_cleanup(control->rq);
+	free(control->rq);
+	control->rq = NULL;
+}
+
+// Initialise the risp system.
+static void init_risp(control_t *control)
+{
+	assert(control);
+	assert(control->risp == NULL);
+
+	control->risp = risp_init();
+	assert(control->risp != NULL);
+	risp_add_invalid(control->risp, cmdInvalid);
+	risp_add_command(control->risp, LOG_CMD_CLEAR, 	     &cmdClear);
+	risp_add_command(control->risp, LOG_CMD_EXECUTE,     &cmdExecute);
+	risp_add_command(control->risp, LOG_CMD_LEVEL,       &cmdLevel);
+ 	risp_add_command(control->risp, LOG_CMD_SETLEVEL,    &cmdSetLevel);
+	risp_add_command(control->risp, LOG_CMD_TEXT,        &cmdText);
+}
+
+// cleanup risp library.
+static void cleanup_risp(control_t *control)
+{
+	assert(control);
+	assert(control->risp);
+
+	risp_shutdown(control->risp);
+	control->risp = NULL;
+}
+
+static void init_signals(control_t *control)
+{
+	assert(control);
+	assert(control->evbase);
+	
+	assert(control->sigint_event == NULL);
+	control->sigint_event = evsignal_new(control->evbase, SIGINT, sigint_handler, control);
+	assert(control->sigint_event);
+	event_add(control->sigint_event, NULL);
+
+	assert(control->sigusr1_event == NULL);
+	control->sigusr1_event = evsignal_new(control->evbase, SIGUSR1, sigusr1_handler, control);
+	assert(control->sigusr1_event);
+	event_add(control->sigusr1_event, NULL);
+
+	assert(control->sigusr2_event == NULL);
+	control->sigusr2_event = evsignal_new(control->evbase, SIGUSR2, sigusr2_handler, control);
+	assert(control->sigusr2_event);
+	event_add(control->sigusr2_event, NULL);
+}
+
+static void cleanup_signals(control_t *control)
+{
+	assert(control);
+	assert(control->sigint_event == NULL);
+	assert(control->sigusr1_event == NULL);
+	assert(control->sigusr2_event == NULL);
+}
+
+//-----------------------------------------------------------------------------
+// add the controller details to the rq library so taht it can manage
+// connecting to the controller.
+static void init_controllers(control_t *control)
+{
+	char *str;
+	
+	assert(control);
+	assert(control->settings);
+	assert(control->settings->controllers);
+	assert(control->rq);
+
+	while ((str = ll_pop_head(control->settings->controllers))) {
+		rq_addcontroller(control->rq, str);
+		free(str);
+	}
+}
+
+static void cleanup_controllers(control_t *control)
+{
+	assert(control);
+	assert(control->settings);
+	assert(control->settings->controllers);
+	assert(ll_count(control->settings->controllers) == 0);
+}
+
+//-----------------------------------------------------------------------------
+// connect to the specific queues that we want to connect to.  We wont use a
+// specific handler for the queue, but will use a generic handler for both
+// queues.  We can do this because both queues use compatible message
+// structures.
+static void init_queues(control_t *control)
+{
+	assert(control);
+	assert(control->settings);
+	assert(control->settings->queue);
+	assert(control->rq);
+	
+	rq_consume(control->rq, control->settings->queue, 2, RQ_PRIORITY_NORMAL, 1, message_handler, control);
+	if (control->settings->levelsqueue) {
+		rq_consume(control->rq, control->settings->levelsqueue, 0, RQ_PRIORITY_NONE, 0, message_handler, control);
+	}
+}
+
+static void cleanup_queues(control_t *control)
+{
+	assert(control);
+
+	// not really anything we can do about the queues, they get cleaned up automatically by RQ.
+}
+
+static void init_logfile(control_t *control)
+{
+	assert(control);
+	assert(control->settings);
+	assert(control->settings->filename);
+	
+	assert(control->logging == NULL);
+	control->logging = (logging_t *) malloc(sizeof(logging_t));
+	log_init(control->logging, control->settings->filename, 1);
+
+	assert(control->evbase);
+	log_buffered(control->logging, control->evbase);
+}
+
+static void cleanup_logfile(control_t *control)
+{
+	assert(control);
+	assert(control->logging);
+
+	assert(control->evbase == NULL);
+
+	log_free(control->logging);
+	free(control->logging);
+	control->logging = NULL;
+}
+
+/// %%%%%%%
+
 
 
 void process_args(settings_t *settings, int argc, char **argv)
 {
 	int c;
 	
-	while ((c = getopt(argc, argv, "p:k:c:hvd:u:P:l:s:a:A:b:B:")) != -1) {
+	while (-1 != (c = getopt(argc, argv,
+			"h"   /* help */
+			"v"   /* verbose */
+			"d:"  /* start as daemmon */
+			"u:"  /* username to run as */
+			"P:"  /* pidfile to store pid to */
+			"c:"	/* controller to connect to */
+			"l:"  /* logfile */
+			"q:"  /* logger queue */
+			"Q:"  /* levels queue */
+		))) {
 		switch (c) {
-			
-			case 'p':
-				settings->path = optarg;
-				assert(settings->path != NULL);
+
+			case 'c':
+				assert(settings->controllers);
+				ll_push_tail(settings->controllers, strdup(optarg));
 				break;
-			case 't':
-				settings->threshold = atoi(optarg);
-				assert(settings->threshold > 0);
+
+			case 'l':
+				assert(settings->filename == NULL);
+				settings->filename = strdup(optarg);
+				assert(settings->filename);
 				break;
-			
 			case 'q':
-				settings->queue = optarg;
-				assert(settings->queue != NULL);
+				assert(settings->queue == NULL);
+				settings->queue = strdup(optarg);
+				assert(settings->queue);
 				break;
 			case 'Q':
 				assert(settings->levelsqueue == NULL);
-				settings->levelsqueue = optarg;
-				assert(settings->levelsqueue != NULL);
-				break;
-				
-			
-			case 'a':
-				assert(settings->primary == NULL);
-				settings->primary = optarg;
-				assert(settings->primary != NULL);
-				assert(settings->primary[0] != '\0');
-				break;
-			case 'A':
-				settings->priport = atoi(optarg);
-				assert(settings->priport > 0);
-				break;
-
-			case 'b':
-				assert(settings->secondary == NULL);
-				settings->secondary = optarg;
-				assert(settings->secondary != NULL);
-				assert(settings->secondary[0] != '\0');
-				break;
-			case 'B':
-				settings->secport = atoi(optarg);
-				assert(settings->secport > 0);
+				settings->levelsqueue = strdup(optarg);
+				assert(settings->levelsqueue);
 				break;
 
 			case 'h':
@@ -398,15 +696,13 @@ void process_args(settings_t *settings, int argc, char **argv)
 				break;
 			case 'u':
 				assert(settings->username == NULL);
-				settings->username = optarg;
+				settings->username = strdup(optarg);
 				assert(settings->username != NULL);
-				assert(settings->username[0] != '\0');
 				break;
 			case 'P':
 				assert(settings->pid_file == NULL);
-				settings->pid_file = optarg;
+				settings->pid_file = strdup(optarg);
 				assert(settings->pid_file != NULL);
-				assert(settings->pid_file[0] != '\0');
 				break;
 				
 			default:
@@ -416,29 +712,6 @@ void process_args(settings_t *settings, int argc, char **argv)
 	}
 }
 
-// Handle the message that was sent over the queue.  the message itself uses
-// the RISP method, so we pass the data on to the risp processor.
-void message_handler(rq_message_t *msg, void *arg)
-{
-	int processed;
-	control_t *control;
-
-	assert(msg != NULL);
-	assert(msg->type == RQ_TYPE_REQUEST);
-	assert(msg->noreply == 1);
-	
-	control = (control_t *) arg;
-	assert(control != NULL);
-	
-	assert(control->req == NULL);
-	control->req = msg;
-
-	assert(control->risp != NULL);
-	processed = risp_process(control->risp, control, msg->data.length, msg->data.data);
-	assert(processed == msg->data.length);
-
-	control->req = NULL;
-}
 
 
 
@@ -449,131 +722,55 @@ int main(int argc, char **argv)
 {
 	control_t      *control  = NULL;
 
-	// handle SIGINT 
-	signal(SIGINT, sig_handler);
-	
-	// Create and init our controller object.   The  control object will have
-	// everything in it that is needed to run this server.  It is in this object
-	// because we need to pass a pointer to the handler that will be doing the
-	// work.
+///============================================================================
+/// Initialization.
+///============================================================================
+
 	control = (control_t *) malloc(sizeof(control_t));
-	assert(control != NULL);
-	control_init(control);
 
-	
-	// process arguments
-	process_args(&control->settings, argc, argv);
+	init_control(control);
+	init_settings(control);
 
-	// check that we have all our required settings.
-	if (control->settings.primary == NULL) {
-		fprintf(stderr, "Need a primary controller specified.\n");
-		exit(EXIT_FAILURE);
-	}
-	if (control->settings.path == NULL) {
-		fprintf(stderr, "Need to specify a path for the logs.\n");
-		exit(EXIT_FAILURE);
-	}
-	if (control->settings.queue == NULL) {
-		control->settings.queue = "logger";
-	}
+	process_args(control->settings, argc, argv);
 
-	// If we need to run as a daemon, then do so, dropping privs to a specific
-	// username if it was specified, and creating a pid file, if that was
-	// specified.
-	if (control->settings.daemonize) {
-		if (rq_daemon(control->settings.username, control->settings.pid_file, control->settings.verbose) != 0) {
-			fprintf(stderr, "failed to daemon() in order to daemonize\n");
-			exit(EXIT_FAILURE);
-		}
-	}
+	check_settings(control);
+	init_daemon(control);
+	init_events(control);
+	init_logfile(control);
+	init_rq(control);
+	init_risp(control);
+	init_signals(control);
+	init_controllers(control);
+	init_queues(control);
 
+///============================================================================
+/// Main Event Loop.
+///============================================================================
 
-	
-
-
-	control->req = NULL;
-
-	if (control->settings.verbose) printf("Initialising the event system.\n");
-	assert(main_event_base == NULL);
-	main_event_base = event_init();
-	rq_setevbase(&control->rq, main_event_base);
-
-	if (control->settings.verbose) printf("Adding controller: %s:%d\n", control->settings.primary, control->settings.priport);
-	assert(control->settings.primary != NULL);
-	assert(control->settings.priport > 0);
-	rq_addcontroller(&control->rq, control->settings.primary, control->settings.priport);
-
-	if (control->settings.secondary != NULL) {
-		if (control->settings.verbose) printf("Adding controller: %s:%d\n", control->settings.secondary, control->settings.secport);
-		assert(control->settings.secport > 0);
-		rq_addcontroller(&control->rq, control->settings.secondary, control->settings.secport);
-	}
-
-	// Initialise the risp system.
-	assert(control->risp == NULL);
-	control->risp = risp_init();
-	assert(control->risp != NULL);
-	risp_add_invalid(control->risp, cmdInvalid);
-	risp_add_command(control->risp, LOG_CMD_CLEAR, 	     &cmdClear);
-	risp_add_command(control->risp, LOG_CMD_EXECUTE,     &cmdExecute);
-	risp_add_command(control->risp, LOG_CMD_LEVEL,       &cmdLevel);
- 	risp_add_command(control->risp, LOG_CMD_SETLEVEL,    &cmdSetLevel);
-	risp_add_command(control->risp, LOG_CMD_TIME,        &cmdTime);
-	risp_add_command(control->risp, LOG_CMD_TEXT,        &cmdText);
-
-
-	// tell RQ that we want a timeout event after 1000 miliseconds (1 second);
-	// this is a one-time timeout, so when handling it, will need to set another.
-	assert(control != NULL);
-	if (control->settings.verbose) printf("Setting 1 second timeout\n");
-	rq_settimeout(&control->rq, 1000, timeout_handler, control);
-	
-	
-	// connect to the specific queues that we want to connect to.  We wont use a
-	// specific handler for the queue, but will use a generic handler for both
-	// queues.  We can do this because both queues use compatible message
-	// structures.
-	assert(control != NULL);
-	assert(control->settings.queue != NULL);
-	if (control->settings.verbose) printf("Consuming queue: %s\n", control->settings.queue);
-	rq_consume(&control->rq, control->settings.queue, 2, RQ_PRIORITY_NORMAL, 1, message_handler, control);
-	if (control->settings.levelsqueue != NULL) {
-		rq_consume(&control->rq, control->settings.levelsqueue, 0, RQ_PRIORITY_NONE, 0, message_handler, control);
-	}
-	
 	// enter the processing loop.  This function will not return until there is
-	// an interrupt and it is time for the service to shutdown.  Therefore
-	// everything needs to be setup and running before this point.  Once inside
-	// the rq_process function, everything is initiated by the RQ event system.
+	// nothing more to do and the service has shutdown.  Therefore everything
+	// needs to be setup and running before this point.  Once inside the
+	// rq_process function, everything is initiated by the RQ event system.
 	assert(control != NULL);
-	assert(control->rq.evbase);
-	if (control->settings.verbose) printf("Starting event loop\n");
-	event_base_loop(control->rq.evbase, 0);
+	assert(control->evbase);
+	event_base_loop(control->evbase, 0);
 
-	if (control->settings.verbose) printf("\nShutting down\n");
+///============================================================================
+/// Shutdown
+///============================================================================
 
-	// cleanup risp library.
-	assert(control != NULL);
-	assert(control->risp != NULL);
-	risp_shutdown(control->risp);
-	control->risp = NULL;
+	cleanup_events(control);
+	cleanup_queues(control);
+	cleanup_controllers(control);
+	cleanup_signals(control);
+	cleanup_risp(control);
+	cleanup_rq(control);
+	cleanup_logfile(control);
+	cleanup_daemon(control);
+	cleanup_settings(control);
+	cleanup_control(control);
 
-	// remove the PID file if we're a daemon
-	if (control->settings.daemonize && control->settings.pid_file != NULL) {
-		assert(control->settings.pid_file[0] != 0);
-		unlink(control->settings.pid_file);
-	}
-
-	// req should only have a value when in the middle of processing a request.
-	assert(control->req == NULL);
-
-  // clean up the 'control' structure, closing any handles that are still open.
-	assert(control != NULL);
-	control_cleanup(control);
-	assert(control != NULL);
 	free(control);
-	control = NULL;
-
 
 	return 0;
 }
