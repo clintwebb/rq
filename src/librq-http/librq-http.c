@@ -9,6 +9,12 @@
 
 #include "rq-http.h"
 
+
+#if (RQ_HTTP_VERSION != 0x00010000)
+#error "Compiling against incorrect version of rq-http.h"
+#endif
+
+
 // #include <arpa/inet.h>
 #include <assert.h>
 // #include <errno.h>
@@ -25,11 +31,15 @@
 void rq_http_init(rq_http_t *http)
 {
 	assert(http);
+
+	assert(0);
 }
 
 void rq_http_free(rq_http_t *http)
 {
 	assert(http);
+
+	assert(0);
 }
 
 

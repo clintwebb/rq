@@ -181,32 +181,27 @@ typedef struct {
 	queue_id_t qid;
 	unsigned short timeout;
 	unsigned short priority;
-	expbuf_t payload;
-	expbuf_t queue;
+	expbuf_t *payload;
+	expbuf_t *queue;
 } rq_data_t;
 
 
 typedef struct {
 	evutil_socket_t handle;		// socket handle to the connected controller.
-	enum {
-		unknown,
-		connecting,
-		active,
-		closing,
-		inactive
-	} status;
+	char active;
+	char closing;
+	char shutdown;
 	struct event *read_event, *write_event, *connect_event;
 	rq_t *rq;
 	risp_t *risp;
 	
 	char *hostname;
 	
-	expbuf_t *in, *out, *readbuf;
+	expbuf_t *inbuf, *outbuf, *readbuf;
 	rq_data_t data;
 	
-	// linked-list of the messages that are being processed (on the head), and
-	// the empty messages that can be used (at the tail)
-	list_t messages;
+	// linked-lists of the messages that are being processed.
+	list_t *in_msgs, *out_msgs;
 
 } rq_conn_t;
 

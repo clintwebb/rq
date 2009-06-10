@@ -5,6 +5,9 @@
 #include <expbuf.h>
 
 
+#define RQ_HTTP_VERSION	0x00010000
+#define RQ_HTTP_VERSION_NAME "1.00.00
+
 
 // null param (0 to 63)
 #define HTTP_CMD_NOP              0

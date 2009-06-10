@@ -2,8 +2,12 @@
 
 all: rq-log 
 
+DEBUG_LIBS=-lefence -lpthread
+#DEBUG_LIBS=
+
+
 ARGS=-Wall -O2
-LIBS=-levlogging -lrispbuf -lrisp -levent -lexpbufpool -lmempool -lexpbuf -lrq -llinklist
+LIBS=-levlogging -lrispbuf -lrisp -levent -lexpbufpool -lmempool -lexpbuf -lrq -llinklist $(DEBUG_LIBS)
 
 # Need to be able to make 'man-pages' as well.  Not sure where to get the source for those... 
 

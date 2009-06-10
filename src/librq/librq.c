@@ -19,8 +19,10 @@
 #include <unistd.h>
 
 
-
-static void rq_process_handler(int fd, short int flags, void *arg);
+// pre-declare the handlers otherwise we end up with a precedence loop.
+static void rq_read_handler(int fd, short int flags, void *arg);
+static void rq_write_handler(int fd, short int flags, void *arg);
+static void rq_connect_handler(int fd, short int flags, void *arg);
 
 
 
@@ -171,9 +173,9 @@ int rq_daemon(char *username, char *pidfile, int noclose)
 }
 
 
-void rq_data_init(rq_data_t *data)
+static void rq_data_init(rq_data_t *data, expbuf_pool_t *pool)
 {
-	assert(data != NULL);
+	assert(data && pool);
 	
 	data->flags = 0;
 	data->mask = 0;
@@ -182,15 +184,25 @@ void rq_data_init(rq_data_t *data)
 	data->qid = 0;
 	data->timeout = 0;
 	data->priority = 0;
-	expbuf_init(&data->payload, 0);
-	expbuf_init(&data->queue, 0);
+
+	data->payload = expbuf_pool_new(pool, 0);
+	data->queue   = expbuf_pool_new(pool, 0);
 }
 
-void rq_data_free(rq_data_t *data)
+static void rq_data_free(rq_data_t *data, expbuf_pool_t *pool)
 {
-	assert(data != NULL);
-	expbuf_free(&data->payload);
-	expbuf_free(&data->queue);
+	assert(data && pool);
+
+	assert(data->payload);
+	assert(data->queue);
+	
+	expbuf_clear(data->payload);
+	expbuf_pool_return(pool, data->payload);
+	data->payload = NULL;
+
+	expbuf_clear(data->queue);
+	expbuf_pool_return(pool, data->queue);
+	data->queue = NULL;
 }
 
 
@@ -218,70 +230,344 @@ void rq_queue_free(rq_queue_t *queue)
 }
 
 
-// This function is called whenever we lose a connection to the controller.
-void rq_conn_closed(rq_conn_t *conn)
+
+
+
+
+
+//-----------------------------------------------------------------------------
+// Assuming that the rq structure has been properlly filled out, this function
+// will initiate the connection process to a specified IP address.   Since the
+// application may be using the event loop for other things, and since we need
+// to support primary and secondary controllers, we need to connect in
+// non-blocking mode.
+//
+// This function will ONLY attempt to connect to the connection at the top of
+// the list.  To cycle through to a different controller, some other
+// functionality will need to move the top conn to the tail.  This would either
+// be because the controller sent a CLOSING instruction, or the socket
+// connection failed.   This means that if the connection is dropped, that
+// functionality should move the current conn to the tail, and the next connect
+// attempt would be against the alternate controller.
+static void rq_connect(rq_t *rq)
 {
+	rq_conn_t *conn;
+	int i, j;
+	struct sockaddr saddr;
+	unsigned long ulAddress;
+	struct hostent *hp;
+	int result;
+	int len;
+
+	assert(rq != NULL);
+
+	assert(rq->evbase != NULL);
+	assert(ll_count(&rq->connlist) > 0);
+
+	// make a note of the first connection in the list.
+	conn = ll_get_head(&rq->connlist);
+
+	if (conn->shutdown == 0 && conn->closing == 0 && conn->connect_event == NULL && conn->active == 0) {
+	
+		assert(conn->hostname != NULL);
+		assert(conn->hostname[0] != '\0');
+		assert(conn->read_event == NULL);
+		assert(conn->write_event == NULL);
+		assert(conn->connect_event == NULL);
+		assert(conn->handle == INVALID_HANDLE);
+		
+		len = sizeof(saddr);
+		if (evutil_parse_sockaddr_port(conn->hostname, &saddr, &len) != 0) {
+			// unable to parse the detail.  What do we need to do?
+			assert(0);
+		}
+		else {
+
+			// create the socket, and set to non-blocking mode.
+									
+			conn->handle = socket(AF_INET,SOCK_STREAM,0);
+			assert(conn->handle >= 0);
+			evutil_make_socket_nonblocking(conn->handle);
+
+			result = connect(conn->handle, &saddr, sizeof(saddr));
+			assert(result < 0);
+			assert(errno == EINPROGRESS);
+	
+			assert(conn->inbuf == NULL);
+			assert(conn->outbuf == NULL);
+			assert(conn->readbuf == NULL);
+			assert(conn->in_msgs == NULL);
+			assert(conn->out_msgs == NULL);
+	
+			// connect process has been started.  Now we need to create an event so that we know when the connect has completed.
+			assert(conn->rq);
+			assert(conn->rq->evbase);
+			conn->connect_event = event_new(conn->rq->evbase, conn->handle, EV_WRITE, rq_connect_handler, conn);
+			assert(conn->connect_event);
+			event_add(conn->connect_event, NULL);	// TODO: Should we set a timeout on the connect?
+		}
+	}
+}
+
+
+
+//-----------------------------------------------------------------------------
+// This function is called only when we lose a connection to the controller.
+// Since the connection to the controller has failed in some way, we need to
+// move that connection to the tail of the list.
+static void rq_conn_closed(rq_conn_t *conn)
+{
+	rq_message_t *msg;
+	
 	assert(conn);
 
 	assert(conn->rq);
 	assert(conn->rq->bufpool);
 
-	// free all the buffers.
-	assert(conn->readbuf);
-	assert(BUF_LENGTH(conn->readbuf) == 0);
-	expbuf_pool_return(conn->rq->bufpool, conn->readbuf);
-	conn->readbuf = NULL;
+	assert(conn->handle != INVALID_HANDLE);
+	close(conn->handle);
+	conn->handle = INVALID_HANDLE;
 
-	if (conn->in) {
-		expbuf_clear(conn->in);
-		expbuf_pool_return(conn->rq->bufpool, conn->in);
-		conn->in = NULL;
+	// free all the buffers.
+	if (conn->readbuf) {
+		assert(BUF_LENGTH(conn->readbuf) == 0);
+		expbuf_pool_return(conn->rq->bufpool, conn->readbuf);
+		conn->readbuf = NULL;
+	}
+
+	if (conn->inbuf) {
+		expbuf_clear(conn->inbuf);
+		expbuf_pool_return(conn->rq->bufpool, conn->inbuf);
+		conn->inbuf = NULL;
 	}
 	
-	if (conn->out) {
-		expbuf_clear(conn->out);
-		expbuf_pool_return(conn->rq->bufpool, conn->out);
-		conn->out = NULL;
+	if (conn->outbuf) {
+		expbuf_clear(conn->outbuf);
+		expbuf_pool_return(conn->rq->bufpool, conn->outbuf);
+		conn->outbuf = NULL;
 	}
 
 	// cleanup the data structure.
-	rq_data_free(&conn->data);
+	rq_data_free(&conn->data, conn->rq->bufpool);
 
-	// remove the conn from the connlist.
-	assert(0);
+	// remove the conn from the connlist.  It should actually be the highest one in the list, and then put it at the tail of the list.
+	assert(conn->rq);
+	assert(ll_count(&conn->rq->connlist) > 0);
+	if (ll_count(&conn->rq->connlist) > 1) {
+		ll_remove(&conn->rq->connlist, conn, NULL);
+		ll_push_tail(&conn->rq->connlist, conn);
+	}
 
-	// clear the event.
-// 	struct event event;
-	assert(0);
-
-	// timeout all the pending messages, if there are any.
-//	list_t messages;
-	assert(0);
-	
-	// clear the 'messages' linked list.
-	assert(0);
-
+	// clear the events
+	if (conn->read_event) {
+		event_free(conn->read_event);
+		conn->read_event = NULL;
+	}
+	if (conn->write_event) {
+		event_free(conn->write_event);
+		conn->write_event = NULL;
+	}
 	assert(conn->connect_event == NULL);
 
-	// free the conn object.
-	assert(0);
+	// timeout all the pending messages, if there are any.
+	if (conn->in_msgs) {
+		while ((msg = ll_pop_head(conn->in_msgs))) {
+			assert(0);
+		}
+	}
+
+	if (conn->out_msgs) {
+		while ((msg = ll_pop_head(conn->out_msgs))) {
+			assert(0);
+		}
+	}
 	
+
+	conn->active = 0;
+	conn->closing = 0;
+
+	// initiate a connect on the head of the list.
+	assert(conn->rq);
+	rq_connect(conn->rq);
+}
+
+
+// this function is used internally to send the data to the connected RQ
+// controller.  If there is no data currently in the outbound queue, then we
+// will try and send it straight away.   If we couldn't send any or all of it,
+// then we add it to the out queue.  If there was already data in the out
+// queue, then we add this data to the out queue and wait let the event system
+// take care of it.
+static void rq_senddata(rq_conn_t *conn, char *data, int length)
+{
+	int res = 0;
+	
+	assert(conn);
+	assert(data);
+	assert(length > 0);
+
+	assert(conn->handle != INVALID_HANDLE);
+
+	// if the out buffer is empty, then we will try and send what we've got straight away.
+	if (conn->active > 0 && conn->outbuf == NULL) {
+		res = send(conn->handle, data, length, 0);
+		if (res > 0) {
+			assert(res <= length);
+		}
+		else 	if (res == 0) {
+			goto err;
+		}
+		else if (res == -1) {
+			if (errno != EAGAIN && errno != EWOULDBLOCK) {
+				goto err;
+			}
+		}
+	}
+
+	// if the connection is still valid, and we haven't sent everything yet,
+	// then we need to add it to the outgoing queue, and then raise an event.
+	assert(conn->handle != INVALID_HANDLE);
+	if (res < length) {
+
+		assert(res >= 0);
+
+		if (conn->outbuf == NULL) {
+			assert(conn->rq);
+			assert(conn->rq->bufpool);
+			conn->outbuf = expbuf_pool_new(conn->rq->bufpool, (length-res));
+			assert(conn->outbuf);
+		}
+		
+		expbuf_add(conn->outbuf, data+res, length-res);
+		assert(conn->rq->evbase);
+		assert(conn->read_event);
+		assert(conn->write_event == NULL);
+		conn->write_event = event_new(conn->rq->evbase, conn->handle, EV_WRITE | EV_PERSIST, rq_write_handler, conn);
+		event_add(conn->write_event, NULL);
+	}
+
+	return;
+
+err:
+	assert(conn);
+	rq_conn_closed(conn);
 }
 
 
 //-----------------------------------------------------------------------------
-// Used to tell the library that it needs to start shutting down connections so that the application can exit the loop.
+// Send a message to the controller that basically states that this client is
+// closing its connection.
+static void rq_send_closing(rq_conn_t *conn)
+{
+	expbuf_t *buf;
+	
+	assert(conn);
+
+	// get a buffer from the bufpool.
+	assert(conn->rq);
+	assert(conn->rq->bufpool);
+	buf = expbuf_pool_new(conn->rq->bufpool, 3);
+
+	// send consume request to controller.
+	addCmd(buf, RQ_CMD_CLEAR);
+	addCmd(buf, RQ_CMD_CLOSING);
+	addCmd(buf, RQ_CMD_EXECUTE);
+
+	rq_senddata(conn, BUF_DATA(buf), BUF_LENGTH(buf));
+	expbuf_clear(buf);
+	
+	// return the buffer to the bufpool.
+	expbuf_pool_return(conn->rq->bufpool, buf);
+}
+
+
+
+//-----------------------------------------------------------------------------
+// Used to tell the library that it needs to start shutting down connections so
+// that the application can exit the loop.
 void rq_shutdown(rq_t *rq)
 {
+	rq_conn_t *conn;
+	void *next;
+	int pending;
+	
 	assert(rq);
 
-	assert(0);
+	// go thru the connect list, and tell each one that it is shutting down.
+	next = ll_start(&rq->connlist);
+	while ((conn = ll_next(&rq->connlist, &next))) {
+
+		// Because the list entries may move around while being processed, we may
+		// need to restart the list from the head again.  Therefore we need to
+		// check to see if we have already processed this connection.
+		if (conn->shutdown == 0) {
+			conn->shutdown ++;
+	
+			if (conn->handle != INVALID_HANDLE) {
+	
+				// if we have a handle, but not marked as active, then we must still be connecting.
+				if (conn->active == 0) {
+					assert(conn->closing == 0);
+					
+					// need to close the connection, and remove the connect event.
+					assert(conn->connect_event);
+					event_free(conn->connect_event);
+					conn->connect_event = NULL;
+					rq_conn_closed(conn);
+
+					// closing the connection would have moved the conns around in the
+					// list, so we need to reset the 'next'.  This means the loop will
+					// restart again, but we wont process the ones that we have already
+					// marked as 'shutdown'
+					next = ll_start(&rq->connlist);
+				}
+				else {
+					assert(conn->active > 0);
+					assert(conn->connect_event == NULL);
+					assert(conn->read_event);
+					
+					// send 'closing' message to each connected controller.  This should remove the node from any queues it is consuming.
+					rq_send_closing(conn);
+	
+					assert(conn->closing == 0);
+					conn->closing ++;
+				
+					// we need to wait if we are still processing some messages from a queue being consumed.
+					pending = 0;
+					if (conn->in_msgs) {
+						pending = ll_count(conn->in_msgs);
+						assert(0);
+					}
+			
+					// we need to wait if there are replies we haven't heard from yet.
+					if (conn->out_msgs) {
+						pending += ll_count(conn->out_msgs);
+						assert(0);
+					}
+		
+					// close connections if there are no messages waiting to be processed on it.
+					if (pending == 0) {
+						rq_conn_closed(conn);
+						
+						// closing the connection would have moved the conns around in the
+						// list, so we need to reset the 'next'.  This means the loop will
+						// restart again, but we wont process the ones that we have already
+						// marked as 'shutdown'
+						next = ll_start(&rq->connlist);
+						
+					}
+				}
+			}
+		}
+	}
 }
 
 
 void rq_cleanup(rq_t *rq)
 {
 	rq_queue_t *q;
+	rq_conn_t *conn;
+	
 	assert(rq != NULL);
 
 	// cleanup the risp object.
@@ -291,13 +577,35 @@ void rq_cleanup(rq_t *rq)
 	rq->risp = NULL;
 
 	// free the resources allocated for the connlist.
-	assert(ll_count(&rq->connlist) == 0);
-	ll_free(&rq->connlist);
+	while ((conn = ll_pop_head(&rq->connlist))) {
+		assert(conn->handle == INVALID_HANDLE);
+		assert(conn->active == 0);
+		assert(conn->closing == 0);
+		assert(conn->shutdown > 0);
 
-	// cleanup the risp object.
-	assert(rq->risp != NULL);
-	risp_shutdown(rq->risp);
-	rq->risp = NULL;
+		assert(conn->read_event == NULL);
+		assert(conn->write_event == NULL);
+		assert(conn->connect_event == NULL);
+
+		conn->rq = NULL;
+		conn->risp = NULL;
+	
+		assert(conn->hostname);
+		free(conn->hostname);
+		conn->hostname = NULL;
+
+		assert(conn->inbuf == NULL);
+		assert(conn->outbuf == NULL);
+		assert(conn->readbuf == NULL);
+
+		assert(conn->data.payload == NULL);
+		assert(conn->data.queue == NULL);
+	
+		// linked-lists of the messages that are being processed.
+		assert(conn->in_msgs == NULL);
+		assert(conn->out_msgs == NULL);
+	}
+	ll_free(&rq->connlist);
 
 	// cleanup all the queues that we have.
 	while (q = ll_pop_head(&rq->queues)) {
@@ -321,8 +629,8 @@ void rq_cleanup(rq_t *rq)
 
 void rq_setevbase(rq_t *rq, struct event_base *base)
 {
-	assert(rq != NULL);
-	assert(base != NULL);
+	assert(rq);
+	assert(base);
 
 	assert(rq->evbase == NULL);
 	rq->evbase = base;
@@ -366,11 +674,12 @@ static void rq_process_read(rq_conn_t *conn)
 			if (res == BUF_MAX(conn->readbuf)) {
 				expbuf_shrink(conn->readbuf, RQ_DEFAULT_BUFFSIZE);
 				assert(empty == 0);
+				fprintf(stderr, "Increased readbuf to: %d\n", BUF_MAX(conn->readbuf));
 			}
 			else { empty = 1; }
 			
 			// if there is no data in the in-buffer, then we will process the common buffer by itself.
-			if (conn->in == NULL) {
+			if (conn->inbuf == NULL) {
 				res = risp_process(conn->risp, conn, BUF_LENGTH(conn->readbuf), (unsigned char *) BUF_DATA(conn->readbuf));
 				assert(res <= BUF_LENGTH(conn->readbuf));
 				assert(res >= 0);
@@ -378,34 +687,34 @@ static void rq_process_read(rq_conn_t *conn)
 
 				// if there is data left over, then we need to add it to our in-buffer.
 				if (BUF_LENGTH(conn->readbuf) > 0) {
-					if (conn->in == NULL) {
-						conn->in = expbuf_pool_new(conn->rq->bufpool, BUF_LENGTH(conn->readbuf));
-						assert(conn->in);
-					}
-					expbuf_add(conn->in, BUF_DATA(conn->readbuf), BUF_LENGTH(conn->readbuf));
+					assert(conn->inbuf == NULL);
+					conn->inbuf = expbuf_pool_new(conn->rq->bufpool, BUF_LENGTH(conn->readbuf));
+					assert(conn->inbuf);
+					
+					expbuf_add(conn->inbuf, BUF_DATA(conn->readbuf), BUF_LENGTH(conn->readbuf));
 					expbuf_clear(conn->readbuf);
 				}
 			}
 			else {
 				// we have data left in the in-buffer, so we add the content of the common buffer
 				assert(BUF_LENGTH(conn->readbuf) > 0);
-				assert(conn->in);
-				assert(BUF_LENGTH(conn->in) > 0);
-				expbuf_add(conn->in, BUF_DATA(conn->readbuf), BUF_LENGTH(conn->readbuf));
+				assert(conn->inbuf);
+				assert(BUF_LENGTH(conn->inbuf) > 0);
+				expbuf_add(conn->inbuf, BUF_DATA(conn->readbuf), BUF_LENGTH(conn->readbuf));
 				expbuf_clear(conn->readbuf);
 				assert(BUF_LENGTH(conn->readbuf) == 0);
-				assert(BUF_LENGTH(conn->in) > 0 && BUF_DATA(conn->in) != NULL);
+				assert(BUF_LENGTH(conn->inbuf) > 0 && BUF_DATA(conn->inbuf) != NULL);
 
 				// and then process what is there.
-				res = risp_process(conn->risp, conn, BUF_LENGTH(conn->in), (unsigned char *) BUF_DATA(conn->in));
-				assert(res <= BUF_LENGTH(conn->in));
+				res = risp_process(conn->risp, conn, BUF_LENGTH(conn->inbuf), (unsigned char *) BUF_DATA(conn->inbuf));
+				assert(res <= BUF_LENGTH(conn->inbuf));
 				assert(res >= 0);
-				if (res > 0) { expbuf_purge(conn->in, res); }
+				if (res > 0) { expbuf_purge(conn->inbuf, res); }
 
-				if (BUF_LENGTH(conn->in) == 0) {
+				if (BUF_LENGTH(conn->inbuf) == 0) {
 					// the in buffer is now empty, so we should return it to the pool.
-					expbuf_pool_return(conn->rq->bufpool, conn->in);
-					conn->in = NULL;
+					expbuf_pool_return(conn->rq->bufpool, conn->inbuf);
+					conn->inbuf = NULL;
 				}
 			}
 		}
@@ -419,7 +728,6 @@ static void rq_process_read(rq_conn_t *conn)
 			else {
 				assert(res == -1);
 				if (errno != EAGAIN && errno != EWOULDBLOCK) {
-					close(conn->handle);
 					rq_conn_closed(conn);
 				}
 			}
@@ -428,6 +736,9 @@ static void rq_process_read(rq_conn_t *conn)
 	
 	assert(BUF_LENGTH(conn->readbuf) == 0);
 }
+
+
+
 
 static void rq_write_handler(int fd, short int flags, void *arg)
 {
@@ -438,7 +749,7 @@ static void rq_write_handler(int fd, short int flags, void *arg)
 	assert(conn);
 	assert(conn->rq);
 	assert(conn->handle == fd);
-	assert(conn->status == active);
+	assert(conn->active > 0);
 	assert(flags & EV_WRITE);
 	assert(conn->write_event);
 	
@@ -446,7 +757,8 @@ static void rq_write_handler(int fd, short int flags, void *arg)
 	assert(0);
 
 	// if we dont have any more to send, then we need to remove the WRITE event.
-	if (BUF_LENGTH(conn->out) == 0) {
+	assert(conn->outbuf);
+	if (BUF_LENGTH(conn->outbuf) == 0) {
 		event_free(conn->write_event);
 		conn->write_event = NULL;
 	}
@@ -454,65 +766,6 @@ static void rq_write_handler(int fd, short int flags, void *arg)
 
 
 
-// this function is used internally to send the data to the connected RQ
-// controller.  If there is no data currently in the outbound queue, then we
-// will try and send it straight away.   If we couldn't send any or all of it,
-// then we add it to the out queue.  If there was already data in the out
-// queue, then we add this data to the out queue and wait let the event system
-// take care of it.
-static void rq_senddata(rq_conn_t *conn, char *data, int length)
-{
-	int res = 0;
-	
-	assert(conn);
-	assert(data);
-	assert(length > 0);
-
-	assert(conn->handle != INVALID_HANDLE);
-
-	// if the out buffer is empty, then we will try and send what we've got straight away.
-	if (conn->status == active && conn->out == NULL) {
-		res = send(conn->handle, data, length, 0);
-		if (res > 0) {
-			assert(res <= length);
-		}
-		else 	if (res == 0) {
-			goto err;
-		}
-		else if (res == -1) {
-			if (errno != EAGAIN && errno != EWOULDBLOCK) {
-				goto err;
-			}
-		}
-	}
-
-	// if the connection is still valid, and we haven't sent everything yet,
-	// then we need to add it to the outgoing queue, and then raise an event.
-	if (res < length && conn->handle != INVALID_HANDLE) {
-		// there is already data in the out queue...
-		if (res < 0) { res = 0; }
-
-		if (conn->out == NULL) {
-			assert(conn->rq);
-			assert(conn->rq->bufpool);
-			conn->out = expbuf_pool_new(conn->rq->bufpool, (length-res));
-			assert(conn->out);
-		}
-		
-		expbuf_add(conn->out, data+res, length-res);
-		assert(conn->rq->evbase);
-		assert(conn->read_event);
-		assert(conn->write_event == NULL);
-		conn->write_event = event_new(conn->rq->evbase, conn->handle, EV_WRITE | EV_PERSIST, rq_write_handler, conn);
-		event_add(conn->write_event, NULL);
-	}
-
-	return;
-
-err:
-	close(conn->handle);
-	rq_conn_closed(conn);
-}
 
 
 
@@ -553,6 +806,86 @@ static void rq_send_consume(rq_conn_t *conn, rq_queue_t *queue)
 }
 
 
+static void rq_connect_handler(int fd, short int flags, void *arg)
+{
+	rq_conn_t *conn = (rq_conn_t *) arg;
+	rq_queue_t *q;
+	void *next;
+	int foo, error;
+
+	assert(fd >= 0);
+	assert(flags != 0);
+	assert(conn);
+	assert(conn->rq);
+	assert(conn->handle == fd);
+	assert(flags & EV_WRITE);
+	assert(conn->rq->evbase != NULL);
+
+	// remove the connect handler
+	assert(conn->connect_event);
+	event_free(conn->connect_event);
+	conn->connect_event = NULL;
+
+	foo = sizeof(error);
+	getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &foo);
+	if (error == ECONNREFUSED) {
+		// connect failed...  we need to move this conn object from the list and put it at the tail.
+	
+		assert(conn->active == 0);
+		assert(conn->closing == 0);
+		assert(conn->connect_event == NULL);
+
+		rq_conn_closed(conn);
+	}
+	else {
+
+		assert(conn->active == 0);
+		conn->active ++;
+
+		// now that we have connected, we should get a buffer to handle read data.
+		assert(conn->readbuf == NULL);
+		assert(conn->rq);
+		assert(conn->rq->bufpool);
+		conn->readbuf = expbuf_pool_new(conn->rq->bufpool, RQ_DEFAULT_BUFFSIZE);
+		assert(BUF_MAX(conn->readbuf) >= RQ_DEFAULT_BUFFSIZE);
+		assert(conn->readbuf);
+	
+		// make sure our other buffers are empty, but keep in mind that our outbuf
+		// may have something in it by now.
+		assert(conn->inbuf == NULL);
+		assert(conn->in_msgs == NULL);
+		assert(conn->out_msgs == NULL);
+	
+		// apply the regular read handler now.
+		assert(conn->read_event == NULL);
+		assert(conn->handle > 0);
+		conn->read_event = event_new(conn->rq->evbase, conn->handle, EV_READ | EV_PERSIST, rq_read_handler, conn);
+		event_add(conn->read_event, NULL);
+	
+		// if we have data in our out buffer, we need to create the WRITE event.
+		if (conn->outbuf) {
+			if (BUF_LENGTH(conn->outbuf) > 0) {
+				assert(conn->handle != INVALID_HANDLE && conn->handle > 0);
+				assert(conn->write_event == NULL);
+				assert(conn->rq->evbase);
+				conn->write_event = event_new(conn->rq->evbase, conn->handle, EV_WRITE | EV_PERSIST, rq_write_handler, conn);
+				event_add(conn->write_event, NULL);
+			}
+		}
+		
+		// now that we have an active connection, we need to send our queue requests.
+		next = ll_start(&conn->rq->queues);
+		while ((q = ll_next(&conn->rq->queues, &next))) {
+			rq_send_consume(conn, q);
+		}
+	
+		// just in case there is some data there already.
+		rq_process_read(conn);
+	}
+}
+
+
+
 static void rq_read_handler(int fd, short int flags, void *arg)
 {
 	rq_conn_t *conn = (rq_conn_t *) arg;
@@ -563,126 +896,13 @@ static void rq_read_handler(int fd, short int flags, void *arg)
 	assert(flags != 0);
 	assert(conn);
 	assert(conn->rq);
-	assert(conn->status == active);
+	assert(conn->active > 0);
 	assert(flags & EV_READ);
 	
 	rq_process_read(conn);
 }
 
 
-
-static void rq_connect_handler(int fd, short int flags, void *arg)
-{
-	rq_conn_t *conn = (rq_conn_t *) arg;
-	rq_queue_t *q;
-	void *next;
-
-	assert(fd >= 0);
-	assert(flags != 0);
-	assert(conn);
-	assert(conn->rq);
-	assert(conn->handle == fd);
-
-	assert(flags & EV_WRITE);
-
-	assert(conn->status == connecting);
-	conn->status = active;
-
-	// remove the connect handler, and apply the regular read handler now.
-	assert(conn->rq->evbase != NULL);
-	assert(conn->read_event);
-	
-	event_del(conn->read_event);
-	conn->read_event = event_new(conn->rq->evbase, conn->handle, EV_READ | EV_PERSIST, rq_read_handler, conn);
-	event_add(conn->read_event, NULL);
-
-	// if we have data in our out buffer, we need to create the WRITE event.
-	if (BUF_LENGTH(conn->out) > 0) {
-		assert(conn->handle != INVALID_HANDLE && conn->handle > 0);
-		assert(conn->write_event == NULL);
-		assert(conn->rq->evbase);
-		conn->write_event = event_new(conn->rq->evbase, conn->handle, EV_WRITE | EV_PERSIST, rq_write_handler, conn);
-		event_add(conn->write_event, NULL);
-	}
-
-	// now that we have an active connection, we need to send our queue requests.
-	next = ll_start(&conn->rq->queues);
-	while (q = ll_next(&conn->rq->queues, &next)) {
-		rq_send_consume(conn, q);
-	}
-
-	// just in case there is some data there already.
-	rq_process_read(conn);
-}
-
-
-
-
-
-
-//-----------------------------------------------------------------------------
-// Assuming that the rq structure has been properlly filled out, this function
-// will initiate the connection process to a specified IP address.   Since the
-// application may be using the event loop for other things, and since we need
-// to support primary and secondary controllers, we need to connect in
-// non-blocking mode.
-static void rq_connect(rq_t *rq)
-{
-	evutil_socket_t sock;
-	rq_conn_t *conn, *first;
-	int i, j;
-	struct sockaddr saddr;
-// 	struct sockaddr_in sin;
-	unsigned long ulAddress;
-	struct hostent *hp;
-	int result;
-	int len;
-
-	assert(rq != NULL);
-
-	assert(rq->evbase != NULL);
-	assert(ll_count(&rq->connlist) > 0);
-
-	conn = ll_get_head(&rq->connlist);
-	first = conn;
-	result = -1;
-	while (conn && result < 0) {
-
-		assert(conn->hostname != NULL);
-		assert(conn->hostname[0] != '\0');
-		assert(conn->read_event == NULL);
-		assert(conn->write_event == NULL);
-
-		len = sizeof(saddr);
-		if (evutil_parse_sockaddr_port(conn->hostname, &saddr, &len) != 0) {
-			// unable to parse the detail.  What do we need to do?
-			assert(0);
-		}
-		else {
-			sock = socket(AF_INET,SOCK_STREAM,0);
-			assert(sock >= 0);
-							
-			// Before we attempt to connect, set the socket to non-blocking mode.
-			evutil_make_socket_nonblocking(sock);
-	
-			conn->handle = sock;
-			conn->status = connecting;
-	
-			result = connect(sock, &saddr, sizeof(saddr));
-			assert(result < 0);
-			assert(errno == EINPROGRESS);
-	
-			// connect process has been started.  Now we need to create an event so that we know when the connect has completed.
-			assert(conn->connect_event == NULL);
-			assert(conn->read_event == NULL);
-			assert(conn->write_event == NULL);
-			assert(conn->rq);
-			assert(conn->rq->evbase);
-			conn->connect_event = event_new(conn->rq->evbase, sock, EV_WRITE, rq_connect_handler, conn);
-			event_add(conn->connect_event, NULL);
-		}
-	}
-}
 
 
 
@@ -698,7 +918,9 @@ void rq_addcontroller(rq_t *rq, char *host)
 	assert(rq != NULL);
 	assert(host != NULL);
 	assert(host[0] != '\0');
-	
+
+	fprintf(stderr, "rq: addcontroller(\"%s\")\n", host);
+
 	conn = (rq_conn_t *) malloc(sizeof(rq_conn_t));
 	assert(conn);
 	
@@ -709,19 +931,23 @@ void rq_addcontroller(rq_t *rq, char *host)
 	conn->write_event = NULL;
 	conn->connect_event = NULL;
 
-	assert(rq->bufpool);
-	conn->readbuf = expbuf_pool_new(rq->bufpool, RQ_DEFAULT_BUFFSIZE);
-	
-	conn->in = NULL;
-	conn->out = NULL;
-	
-	rq_data_init(&conn->data);
+	conn->readbuf = NULL;	
+	conn->inbuf = NULL;
+	conn->outbuf = NULL;
+
+	conn->in_msgs = NULL;
+	conn->out_msgs = NULL;
 
 	assert(rq->risp);
 	conn->risp = rq->risp;
 
 	conn->rq = rq;
-	conn->status = inactive;
+	conn->active = 0;
+	conn->shutdown = 0;
+
+	assert(conn->rq);
+	assert(conn->rq->bufpool);
+	rq_data_init(&conn->data, conn->rq->bufpool);
 
 	ll_push_tail(&rq->connlist, conn);
 
@@ -783,7 +1009,7 @@ void rq_consume(rq_t *rq, char *queue, int max, int priority, int exclusive, voi
 		assert(q != NULL);
 
 		rq_queue_init(q);
-		q->queue = queue;
+		q->queue = strdup(queue);
 		q->handler = handler;
 		q->arg = arg;
 		q->exclusive = exclusive;
@@ -795,7 +1021,7 @@ void rq_consume(rq_t *rq, char *queue, int max, int priority, int exclusive, voi
 		// check to see if the top connection is active.  If so, send the consume request.
 		conn = ll_get_head(&rq->connlist);
 		assert(conn);
-		if (conn->status == active) {
+		if (conn->active > 0 && conn->closing > 0) {
 			rq_send_consume(conn, q);
 		}
 	}
@@ -832,7 +1058,7 @@ static void processRequest(rq_conn_t *conn)
 		if (BIT_TEST(conn->data.mask, RQ_DATA_MASK_QUEUEID))
 			qid = conn->data.qid;
 		if (BIT_TEST(conn->data.mask, RQ_DATA_MASK_QUEUE))
-			qname = expbuf_string(&conn->data.queue);
+			qname = expbuf_string(conn->data.queue);
 		assert((qname == NULL && qid > 0) || (qname && qid == 0));
 
 		// find the queue to handle this request.
@@ -899,7 +1125,8 @@ static void processRequest(rq_conn_t *conn)
 				msg->noreply = 1;
 
 			assert(msg->data);
-			expbuf_set(msg->data, BUF_DATA(&conn->data.payload), BUF_LENGTH(&conn->data.payload));
+			assert(conn->data.payload);
+			expbuf_set(msg->data, BUF_DATA(conn->data.payload), BUF_LENGTH(conn->data.payload));
 		
 			queue->handler(msg, queue->arg);
 
@@ -925,11 +1152,25 @@ static void processRequest(rq_conn_t *conn)
 		assert(0);
 	}
 }
-			
+
+
+//-----------------------------------------------------------------------------
+// By receiving the closing command from the controller, we should not get any
+// more queue requests to consume.  Also as soon as there are no more messages
+// waiting for replies, the controller will drop the connection.  Therefore,
+// when this command is processed, we need to initiate a connection to an
+// alternative controller that can receive requests.
 static void processClosing(rq_conn_t *conn)
 {
 	assert(conn);
-	assert(0);
+
+	// mark the connectiong as 'closing'.
+	assert(conn->closing == 0);
+	conn->closing ++;
+
+	// initialise the connection to the alternate controller.
+	assert(conn->rq);
+	rq_connect(conn->rq);
 }
 
 static void processServerFull(rq_conn_t *conn)
@@ -992,8 +1233,8 @@ static void cmdClear(void *ptr)
 	conn->data.timeout = 0;
 	conn->data.priority = 0;
 
-	expbuf_clear(&conn->data.queue);
-	expbuf_clear(&conn->data.payload);
+	expbuf_clear(conn->data.queue);
+	expbuf_clear(conn->data.payload);
 }
 
 
@@ -1040,7 +1281,7 @@ static void cmdExecute(void *ptr)
 	else if (BIT_TEST(conn->data.flags, RQ_DATA_FLAG_DELIVERED))
 		processDelivered(conn);
 	else if (BIT_TEST(conn->data.mask, RQ_DATA_MASK_QUEUEID))
-		storeQueueID(conn, expbuf_string(&conn->data.queue), conn->data.qid);
+		storeQueueID(conn, expbuf_string(conn->data.queue), conn->data.qid);
 	else {
 		fprintf(stderr, "Unexpected command - (flags:%x, mask:%x)\n", conn->data.flags, conn->data.mask);
 		assert(0);
@@ -1307,8 +1548,8 @@ static void cmdPayload(void *ptr, risp_length_t length, risp_char_t *data)
  	assert(conn);
  	assert(length > 0);
  	assert(data);
- 	
- 	expbuf_set(&conn->data.payload, data, length);
+
+ 	expbuf_set(conn->data.payload, data, length);
 	BIT_SET(conn->data.mask, RQ_DATA_MASK_PAYLOAD);
 }
 
@@ -1316,10 +1557,12 @@ static void cmdPayload(void *ptr, risp_length_t length, risp_char_t *data)
 static void cmdQueue(void *ptr, risp_length_t length, risp_char_t *data)
 {
 	rq_conn_t *conn = (rq_conn_t *) ptr;
- 	assert(conn != NULL);
+	
+ 	assert(conn);
  	assert(length > 0);
- 	assert(data != NULL);
- 	expbuf_set(&conn->data.queue, data, length);
+ 	assert(data);
+ 	
+ 	expbuf_set(conn->data.queue, data, length);
  	BIT_SET(conn->data.mask, RQ_DATA_MASK_QUEUE);
 }
 
@@ -1484,3 +1727,7 @@ void rq_reply(rq_message_t *msg)
 
 	assert(0);
 }
+
+
+
+

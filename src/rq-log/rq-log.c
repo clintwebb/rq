@@ -1,11 +1,10 @@
 //-----------------------------------------------------------------------------
-// RISP Server
-// Example code that demonstrate how to develop a server that communicates thru 
-// a RISP protocol.
+// rq-log
+//	Logging service for an RQ system.
 //-----------------------------------------------------------------------------
 
 
-#include "rq-log.h"
+#include <rq-log.h>
 
 // includes
 #include <assert.h>
@@ -226,7 +225,6 @@ static void sigint_handler(evutil_socket_t fd, short what, void *arg)
 {
  	control_t *control = (control_t *) arg;
 
-	assert(fd < 0);
 	assert(arg);
 
 	// need to initiate an RQ shutdown.
@@ -353,6 +351,7 @@ static void cleanup_control(control_t *control)
 {
 	assert(control != NULL);
 
+	assert(control->risp == NULL);
 	assert(control->logging == NULL);
 	assert(control->settings == NULL);
 	assert(control->rq == NULL);
@@ -369,6 +368,9 @@ static void init_settings(control_t *control)
 	assert(control);
 
 	assert(control->settings == NULL);
+
+	control->settings = (settings_t *) malloc(sizeof(settings_t));
+	assert(control->settings);
 
 	control->settings->verbose = 0;
 	control->settings->daemonize = false;
@@ -419,6 +421,9 @@ static void cleanup_settings(control_t *control)
 		free(control->settings->pid_file);
 		control->settings->pid_file = NULL;
 	}
+
+	free(control->settings);
+	control->settings = NULL;
 }
 
 //-----------------------------------------------------------------------------
@@ -440,6 +445,7 @@ static void check_settings(control_t *control)
 	}
 	if (control->settings->queue == NULL) {
 		control->settings->queue = strdup("logger");
+		assert(control->settings->queue);
 	}
 }
 
@@ -477,7 +483,6 @@ static void init_events(control_t *control)
 	assert(control->evbase == NULL);
 	control->evbase = event_base_new();
 	assert(control->evbase);
-	rq_setevbase(control->rq, control->evbase);
 }
 
 static void cleanup_events(control_t *control)
@@ -496,7 +501,11 @@ static void init_rq(control_t *control)
 	assert(control->rq == NULL);
 
 	control->rq = (rq_t *) malloc(sizeof(rq_t));
-	rq_init(control->rq);	
+	rq_init(control->rq);
+
+	assert(control->evbase);
+	assert(control->rq);
+	rq_setevbase(control->rq, control->evbase);
 }
 
 static void cleanup_rq(control_t *control)
@@ -640,8 +649,6 @@ static void cleanup_logfile(control_t *control)
 	free(control->logging);
 	control->logging = NULL;
 }
-
-/// %%%%%%%
 
 
 

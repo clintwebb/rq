@@ -4,6 +4,7 @@
 
 #include <assert.h>
 #include <rq.h>
+#include <stdlib.h>
 
 void settings_init(settings_t *ptr)
 {
@@ -14,21 +15,30 @@ void settings_init(settings_t *ptr)
 	ptr->username = NULL;
 	ptr->pid_file = NULL;
 
-	ptr->primary = NULL;
-	ptr->priport = RQ_DEFAULT_PORT;
-	ptr->secondary = NULL;
-	ptr->secport = RQ_DEFAULT_PORT;
-	
 	ptr->configfile = NULL;
 	ptr->logqueue = NULL;
 	ptr->statsqueue = NULL;
 	ptr->gzipqueue = NULL;
 	ptr->blacklist = NULL;
+
+	ptr->controllers = (list_t *) malloc(sizeof(list_t));
+	ll_init(ptr->controllers);
 }
 
-void settings_cleanup(settings_t *ptr) 
+void settings_free(settings_t *ptr)
 {
 	assert(ptr != NULL);
+
+	if (ptr->configfile) { free(ptr->configfile); ptr->configfile = NULL; }
+	if (ptr->logqueue)   { free(ptr->logqueue);   ptr->logqueue = NULL; }
+	if (ptr->statsqueue) { free(ptr->statsqueue); ptr->statsqueue = NULL; }
+	if (ptr->gzipqueue)  { free(ptr->gzipqueue);  ptr->gzipqueue = NULL; }
+	if (ptr->blacklist)  { free(ptr->blacklist);  ptr->blacklist = NULL; }
+
+	assert(ptr->controllers);
+	ll_free(ptr->controllers);
+	free(ptr->controllers);
+	ptr->controllers = NULL;
 }
 
 

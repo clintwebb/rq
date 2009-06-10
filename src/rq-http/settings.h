@@ -1,19 +1,20 @@
 #ifndef __RQ_HTTP_SETTINGS
 #define __RQ_HTTP_SETTINGS
 
+#include <linklist.h>
+
 typedef struct {
 	// running params
 	short verbose;
 	short daemonize;
 	char *username;
 	char *pid_file;
-	char *interface;
 
 	// connections to the controllers.
-	char *primary;
-	char *secondary;
-	int priport;
-	int secport;
+	list_t *controllers;
+
+	// TODO: do we want this as a simple string, or as a list?
+	char *interface;
 
 	// unique settings.
 	char *configfile;
@@ -25,7 +26,7 @@ typedef struct {
 
 
 void settings_init(settings_t *ptr);
-void settings_cleanup(settings_t *ptr);
+void settings_free(settings_t *ptr);
 
 
 #endif
