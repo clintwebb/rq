@@ -94,12 +94,9 @@ int rq_new_socket(struct addrinfo *ai) {
 int rq_daemon(char *username, char *pidfile, int noclose)
 {
 	struct passwd *pw;
-	int res;
 	struct sigaction sa;
 	int fd;
 	FILE *fp;
-	
-
 
 	// if we are supplied with a username, drop privs to it.  This will only 
 	// work if we are running as root, and is really only needed when running as 
@@ -187,6 +184,7 @@ static void rq_data_init(rq_data_t *data, expbuf_pool_t *pool)
 
 	data->payload = expbuf_pool_new(pool, 0);
 	data->queue   = expbuf_pool_new(pool, 0);
+	assert(data->payload && data->queue);
 }
 
 static void rq_data_free(rq_data_t *data, expbuf_pool_t *pool)
@@ -252,10 +250,10 @@ void rq_queue_free(rq_queue_t *queue)
 static void rq_connect(rq_t *rq)
 {
 	rq_conn_t *conn;
-	int i, j;
+// 	int i, j;
 	struct sockaddr saddr;
-	unsigned long ulAddress;
-	struct hostent *hp;
+// 	unsigned long ulAddress;
+// 	struct hostent *hp;
 	int result;
 	int len;
 
@@ -298,6 +296,8 @@ static void rq_connect(rq_t *rq)
 			assert(conn->readbuf == NULL);
 			assert(conn->in_msgs == NULL);
 			assert(conn->out_msgs == NULL);
+
+			assert(conn->data == NULL);
 	
 			// connect process has been started.  Now we need to create an event so that we know when the connect has completed.
 			assert(conn->rq);
@@ -348,7 +348,11 @@ static void rq_conn_closed(rq_conn_t *conn)
 	}
 
 	// cleanup the data structure.
-	rq_data_free(&conn->data, conn->rq->bufpool);
+	if (conn->data) {
+		rq_data_free(conn->data, conn->rq->bufpool);
+		free(conn->data);
+		conn->data = NULL;
+	}
 
 	// remove the conn from the connlist.  It should actually be the highest one in the list, and then put it at the tail of the list.
 	assert(conn->rq);
@@ -598,8 +602,7 @@ void rq_cleanup(rq_t *rq)
 		assert(conn->outbuf == NULL);
 		assert(conn->readbuf == NULL);
 
-		assert(conn->data.payload == NULL);
-		assert(conn->data.queue == NULL);
+		assert(conn->data == NULL);
 	
 		// linked-lists of the messages that are being processed.
 		assert(conn->in_msgs == NULL);
@@ -608,7 +611,7 @@ void rq_cleanup(rq_t *rq)
 	ll_free(&rq->connlist);
 
 	// cleanup all the queues that we have.
-	while (q = ll_pop_head(&rq->queues)) {
+	while ((q = ll_pop_head(&rq->queues))) {
 		rq_queue_free(q);
 		free(q);
 	}
@@ -733,7 +736,8 @@ static void rq_process_read(rq_conn_t *conn)
 			}
 		}
 	}
-	
+
+	assert(conn->readbuf);
 	assert(BUF_LENGTH(conn->readbuf) == 0);
 }
 
@@ -811,7 +815,8 @@ static void rq_connect_handler(int fd, short int flags, void *arg)
 	rq_conn_t *conn = (rq_conn_t *) arg;
 	rq_queue_t *q;
 	void *next;
-	int foo, error;
+	socklen_t foo;
+	int error;
 
 	assert(fd >= 0);
 	assert(flags != 0);
@@ -834,6 +839,7 @@ static void rq_connect_handler(int fd, short int flags, void *arg)
 		assert(conn->active == 0);
 		assert(conn->closing == 0);
 		assert(conn->connect_event == NULL);
+		assert(conn->data == NULL);
 
 		rq_conn_closed(conn);
 	}
@@ -855,7 +861,15 @@ static void rq_connect_handler(int fd, short int flags, void *arg)
 		assert(conn->inbuf == NULL);
 		assert(conn->in_msgs == NULL);
 		assert(conn->out_msgs == NULL);
-	
+
+		// initialise the data portion of the 'conn' object.
+		assert(conn->rq);
+		assert(conn->rq->bufpool);
+		assert(conn->data == NULL);
+		conn->data = (rq_data_t *) malloc(sizeof(rq_data_t));
+		assert(conn->data);
+		rq_data_init(conn->data, conn->rq->bufpool);
+
 		// apply the regular read handler now.
 		assert(conn->read_event == NULL);
 		assert(conn->handle > 0);
@@ -889,8 +903,6 @@ static void rq_connect_handler(int fd, short int flags, void *arg)
 static void rq_read_handler(int fd, short int flags, void *arg)
 {
 	rq_conn_t *conn = (rq_conn_t *) arg;
-	rq_queue_t *q;
-	void *next;
 
 	assert(fd >= 0);
 	assert(flags != 0);
@@ -913,7 +925,6 @@ static void rq_read_handler(int fd, short int flags, void *arg)
 void rq_addcontroller(rq_t *rq, char *host)
 {
 	rq_conn_t *conn;
-	int j;
 	
 	assert(rq != NULL);
 	assert(host != NULL);
@@ -944,10 +955,7 @@ void rq_addcontroller(rq_t *rq, char *host)
 	conn->rq = rq;
 	conn->active = 0;
 	conn->shutdown = 0;
-
-	assert(conn->rq);
-	assert(conn->rq->bufpool);
-	rq_data_init(&conn->data, conn->rq->bufpool);
+	conn->data = NULL;
 
 	ll_push_tail(&rq->connlist, conn);
 
@@ -1040,25 +1048,26 @@ static void processRequest(rq_conn_t *conn)
 	expbuf_t *buf;
 	
 	assert(conn);
+	assert(conn->data);
 
 	// strategy has changed, need to check that this is still valid.
 	assert(0);
 
 	// get the required data out of the data structure, and make sure that we have all we need.
-	assert(BIT_TEST(conn->data.flags, RQ_DATA_FLAG_REQUEST));
-	assert(BIT_TEST(conn->data.flags, RQ_DATA_FLAG_BROADCAST) == 0);
+	assert(BIT_TEST(conn->data->flags, RQ_DATA_FLAG_REQUEST));
+	assert(BIT_TEST(conn->data->flags, RQ_DATA_FLAG_BROADCAST) == 0);
 
-	if (BIT_TEST(conn->data.mask, RQ_DATA_MASK_ID) && BIT_TEST(conn->data.mask, RQ_DATA_MASK_PAYLOAD) && (BIT_TEST(conn->data.mask, RQ_DATA_MASK_QUEUEID) || BIT_TEST(conn->data.mask, RQ_DATA_MASK_QUEUE))) {
+	if (BIT_TEST(conn->data->mask, RQ_DATA_MASK_ID) && BIT_TEST(conn->data->mask, RQ_DATA_MASK_PAYLOAD) && (BIT_TEST(conn->data->mask, RQ_DATA_MASK_QUEUEID) || BIT_TEST(conn->data->mask, RQ_DATA_MASK_QUEUE))) {
 
 		// get message ID
-		msgid = conn->data.id;
+		msgid = conn->data->id;
 		assert(msgid > 0);
 
 		// get queue Id or queue name.
-		if (BIT_TEST(conn->data.mask, RQ_DATA_MASK_QUEUEID))
-			qid = conn->data.qid;
-		if (BIT_TEST(conn->data.mask, RQ_DATA_MASK_QUEUE))
-			qname = expbuf_string(conn->data.queue);
+		if (BIT_TEST(conn->data->mask, RQ_DATA_MASK_QUEUEID))
+			qid = conn->data->qid;
+		if (BIT_TEST(conn->data->mask, RQ_DATA_MASK_QUEUE))
+			qname = expbuf_string(conn->data->queue);
 		assert((qname == NULL && qid > 0) || (qname && qid == 0));
 
 		// find the queue to handle this request.
@@ -1107,26 +1116,22 @@ static void processRequest(rq_conn_t *conn)
 			expbuf_pool_return(conn->rq->bufpool, buf);
 
 			assert(conn->rq->msgpool);
-			msg = mempool_get(conn->rq->msgpool, sizeof(rq_message_t));
-			if (msg == NULL) {
-				// there is no message object in the list.  We need to create one.
-				msg = (rq_message_t *) malloc(sizeof(rq_message_t));
-				rq_message_init(msg);
-				mempool_assign(conn->rq->msgpool, msg, sizeof(rq_message_t));
-			}
+			msg = rq_msg_new(conn->rq);
 			assert(msg);
 			assert(msg->id == 0);
 
 			// fill out the message details, and add it to the head of the messages list.
+			assert(conn->data);
 			assert(queue && msgid > 0);
 			msg->queue = queue;
 			msg->id = msgid;
-			if (BIT_TEST(conn->data.flags, RQ_DATA_FLAG_NOREPLY))
+			if (BIT_TEST(conn->data->flags, RQ_DATA_FLAG_NOREPLY))
 				msg->noreply = 1;
 
 			assert(msg->data);
-			assert(conn->data.payload);
-			expbuf_set(msg->data, BUF_DATA(conn->data.payload), BUF_LENGTH(conn->data.payload));
+			assert(conn->data);
+			assert(conn->data->payload);
+			expbuf_set(msg->data, BUF_DATA(conn->data->payload), BUF_LENGTH(conn->data->payload));
 		
 			queue->handler(msg, queue->arg);
 
@@ -1224,17 +1229,18 @@ static void cmdClear(void *ptr)
 {
 	rq_conn_t *conn = (rq_conn_t *) ptr;
 	assert(conn);
-
-	conn->data.mask = 0;
-	conn->data.flags = 0;
+	assert(conn->data);
 	
-	conn->data.id = 0;
-	conn->data.qid = 0;
-	conn->data.timeout = 0;
-	conn->data.priority = 0;
+	conn->data->mask = 0;
+	conn->data->flags = 0;
+	
+	conn->data->id = 0;
+	conn->data->qid = 0;
+	conn->data->timeout = 0;
+	conn->data->priority = 0;
 
-	expbuf_clear(conn->data.queue);
-	expbuf_clear(conn->data.payload);
+	expbuf_clear(conn->data->queue);
+	expbuf_clear(conn->data->payload);
 }
 
 
@@ -1269,21 +1275,22 @@ static void cmdExecute(void *ptr)
 {
 	rq_conn_t *conn = (rq_conn_t *) ptr;
 	assert(conn);
+	assert(conn->data);
 
-	if (BIT_TEST(conn->data.flags, RQ_DATA_FLAG_REQUEST))
+	if (BIT_TEST(conn->data->flags, RQ_DATA_FLAG_REQUEST))
 		processRequest(conn);
-	else if (BIT_TEST(conn->data.flags, RQ_DATA_FLAG_CLOSING))
+	else if (BIT_TEST(conn->data->flags, RQ_DATA_FLAG_CLOSING))
 		processClosing(conn);
-	else if (BIT_TEST(conn->data.flags, RQ_DATA_FLAG_SERVER_FULL))
+	else if (BIT_TEST(conn->data->flags, RQ_DATA_FLAG_SERVER_FULL))
 		processServerFull(conn);
-	else if (BIT_TEST(conn->data.flags, RQ_DATA_FLAG_RECEIVED))
+	else if (BIT_TEST(conn->data->flags, RQ_DATA_FLAG_RECEIVED))
 		processReceived(conn);
-	else if (BIT_TEST(conn->data.flags, RQ_DATA_FLAG_DELIVERED))
+	else if (BIT_TEST(conn->data->flags, RQ_DATA_FLAG_DELIVERED))
 		processDelivered(conn);
-	else if (BIT_TEST(conn->data.mask, RQ_DATA_MASK_QUEUEID))
-		storeQueueID(conn, expbuf_string(conn->data.queue), conn->data.qid);
+	else if (BIT_TEST(conn->data->mask, RQ_DATA_MASK_QUEUEID))
+		storeQueueID(conn, expbuf_string(conn->data->queue), conn->data->qid);
 	else {
-		fprintf(stderr, "Unexpected command - (flags:%x, mask:%x)\n", conn->data.flags, conn->data.mask);
+		fprintf(stderr, "Unexpected command - (flags:%x, mask:%x)\n", conn->data->flags, conn->data->mask);
 		assert(0);
 	}
 }
@@ -1292,19 +1299,20 @@ static void cmdRequest(void *ptr)
 {
 	rq_conn_t *conn = (rq_conn_t *) ptr;
 	assert(conn);
+	assert(conn->data);
 
 	// set the indicated flag.	
-	BIT_SET(conn->data.flags, RQ_DATA_FLAG_REQUEST);
+	BIT_SET(conn->data->flags, RQ_DATA_FLAG_REQUEST);
 
 	// clear the incompatible flags.
 // 	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_REQUEST);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_REPLY);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_RECEIVED);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_DELIVERED);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_BROADCAST);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_UNDELIVERED);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_CLOSING);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_SERVER_FULL);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_REPLY);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_RECEIVED);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_DELIVERED);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_BROADCAST);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_UNDELIVERED);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_CLOSING);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_SERVER_FULL);
 // 	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_NOREPLY);
 
 	// clear the incompatible masks.
@@ -1324,83 +1332,85 @@ static void cmdReceived(void *ptr)
 {
 	rq_conn_t *conn = (rq_conn_t *) ptr;
 	assert(conn);
+	assert(conn->data);
 
 	// set the indicated flag.
-	BIT_SET(conn->data.flags, RQ_DATA_FLAG_RECEIVED);
+	BIT_SET(conn->data->flags, RQ_DATA_FLAG_RECEIVED);
 
 	// clear the incompatible flags.
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_REQUEST);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_REPLY);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_REQUEST);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_REPLY);
 // 	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_RECEIVED);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_DELIVERED);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_BROADCAST);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_UNDELIVERED);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_CLOSING);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_SERVER_FULL);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_NOREPLY);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_DELIVERED);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_BROADCAST);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_UNDELIVERED);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_CLOSING);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_SERVER_FULL);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_NOREPLY);
 
 	// clear the incompatible masks.
-	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_PRIORITY);
-	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_QUEUEID);
-	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_TIMEOUT);
+	BIT_CLEAR(conn->data->mask, RQ_DATA_MASK_PRIORITY);
+	BIT_CLEAR(conn->data->mask, RQ_DATA_MASK_QUEUEID);
+	BIT_CLEAR(conn->data->mask, RQ_DATA_MASK_TIMEOUT);
 // 	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_ID);
-	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_QUEUE);
-	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_PAYLOAD);
-
+	BIT_CLEAR(conn->data->mask, RQ_DATA_MASK_QUEUE);
+	BIT_CLEAR(conn->data->mask, RQ_DATA_MASK_PAYLOAD);
 }
 
 static void cmdDelivered(void *ptr)
 {
 	rq_conn_t *conn = (rq_conn_t *) ptr;
 	assert(conn);
+	assert(conn->data);
 
 	// set the indicated flag.
-	BIT_SET(conn->data.flags, RQ_DATA_FLAG_DELIVERED);
+	BIT_SET(conn->data->flags, RQ_DATA_FLAG_DELIVERED);
 
 	// clear the incompatible flags.
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_REQUEST);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_REPLY);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_RECEIVED);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_REQUEST);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_REPLY);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_RECEIVED);
 // 	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_DELIVERED);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_BROADCAST);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_UNDELIVERED);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_CLOSING);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_SERVER_FULL);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_NOREPLY);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_BROADCAST);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_UNDELIVERED);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_CLOSING);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_SERVER_FULL);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_NOREPLY);
 
 	// clear the incompatible masks.
-	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_PRIORITY);
-	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_QUEUEID);
-	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_TIMEOUT);
+	BIT_CLEAR(conn->data->mask, RQ_DATA_MASK_PRIORITY);
+	BIT_CLEAR(conn->data->mask, RQ_DATA_MASK_QUEUEID);
+	BIT_CLEAR(conn->data->mask, RQ_DATA_MASK_TIMEOUT);
 // 	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_ID);
-	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_QUEUE);
-	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_PAYLOAD);
+	BIT_CLEAR(conn->data->mask, RQ_DATA_MASK_QUEUE);
+	BIT_CLEAR(conn->data->mask, RQ_DATA_MASK_PAYLOAD);
 }
 
 static void cmdBroadcast(void *ptr)
 {
 	rq_conn_t *conn = (rq_conn_t *) ptr;
 	assert(conn);
+	assert(conn->data);
 
 	// set the indicated flag.
-	BIT_SET(conn->data.flags, RQ_DATA_FLAG_BROADCAST);
+	BIT_SET(conn->data->flags, RQ_DATA_FLAG_BROADCAST);
 
 	// clear the incompatible flags.
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_REQUEST);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_REPLY);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_RECEIVED);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_DELIVERED);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_REQUEST);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_REPLY);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_RECEIVED);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_DELIVERED);
 // 	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_BROADCAST);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_UNDELIVERED);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_CLOSING);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_SERVER_FULL);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_UNDELIVERED);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_CLOSING);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_SERVER_FULL);
 // 	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_NOREPLY);
 
 	// clear the incompatible masks.
-	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_PRIORITY);
+	BIT_CLEAR(conn->data->mask, RQ_DATA_MASK_PRIORITY);
 // 	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_QUEUEID);
 // 	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_TIMEOUT);
-	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_ID);
+	BIT_CLEAR(conn->data->mask, RQ_DATA_MASK_ID);
 // 	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_QUEUE);
 // 	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_PAYLOAD);
 	
@@ -1410,19 +1420,20 @@ static void cmdNoreply(void *ptr)
 {
 	rq_conn_t *conn = (rq_conn_t *) ptr;
 	assert(conn);
+	assert(conn->data);
 
 	// set the indicated flag.
-	BIT_SET(conn->data.flags, RQ_DATA_FLAG_NOREPLY);
+	BIT_SET(conn->data->flags, RQ_DATA_FLAG_NOREPLY);
 
 	// clear the incompatible flags.
 // 	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_REQUEST);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_REPLY);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_RECEIVED);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_DELIVERED);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_REPLY);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_RECEIVED);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_DELIVERED);
 // 	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_BROADCAST);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_UNDELIVERED);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_CLOSING);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_SERVER_FULL);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_UNDELIVERED);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_CLOSING);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_SERVER_FULL);
 // 	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_NOREPLY);
 
 	// clear the incompatible masks.
@@ -1440,28 +1451,29 @@ static void cmdClosing(void *ptr)
 	rq_conn_t *conn = (rq_conn_t *) ptr;
 
 	assert(conn);
+	assert(conn->data);
 
 	// set the indicated flag.
-	BIT_SET(conn->data.flags, RQ_DATA_FLAG_CLOSING);
+	BIT_SET(conn->data->flags, RQ_DATA_FLAG_CLOSING);
 
 	// clear the incompatible flags.
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_REQUEST);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_REPLY);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_RECEIVED);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_DELIVERED);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_BROADCAST);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_UNDELIVERED);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_REQUEST);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_REPLY);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_RECEIVED);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_DELIVERED);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_BROADCAST);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_UNDELIVERED);
 // 	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_CLOSING);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_SERVER_FULL);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_NOREPLY);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_SERVER_FULL);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_NOREPLY);
 
 	// clear the incompatible masks.
-	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_PRIORITY);
-	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_QUEUEID);
-	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_TIMEOUT);
-	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_ID);
-	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_QUEUE);
-	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_PAYLOAD);
+	BIT_CLEAR(conn->data->mask, RQ_DATA_MASK_PRIORITY);
+	BIT_CLEAR(conn->data->mask, RQ_DATA_MASK_QUEUEID);
+	BIT_CLEAR(conn->data->mask, RQ_DATA_MASK_TIMEOUT);
+	BIT_CLEAR(conn->data->mask, RQ_DATA_MASK_ID);
+	BIT_CLEAR(conn->data->mask, RQ_DATA_MASK_QUEUE);
+	BIT_CLEAR(conn->data->mask, RQ_DATA_MASK_PAYLOAD);
 	
 }
 	
@@ -1470,29 +1482,29 @@ static void cmdServerFull(void *ptr)
 	rq_conn_t *conn = (rq_conn_t *) ptr;
 
 	assert(conn);
+	assert(conn->data);
 
 	// set the indicated flag.
-	BIT_SET(conn->data.flags, RQ_DATA_FLAG_SERVER_FULL);
+	BIT_SET(conn->data->flags, RQ_DATA_FLAG_SERVER_FULL);
 
 	// clear the incompatible flags.
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_REQUEST);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_REPLY);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_RECEIVED);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_DELIVERED);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_BROADCAST);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_UNDELIVERED);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_CLOSING);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_REQUEST);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_REPLY);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_RECEIVED);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_DELIVERED);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_BROADCAST);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_UNDELIVERED);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_CLOSING);
 // 	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_SERVER_FULL);
-	BIT_CLEAR(conn->data.flags, RQ_DATA_FLAG_NOREPLY);
+	BIT_CLEAR(conn->data->flags, RQ_DATA_FLAG_NOREPLY);
 
 	// clear the incompatible masks.
-	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_PRIORITY);
-	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_QUEUEID);
-	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_TIMEOUT);
-	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_ID);
-	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_QUEUE);
-	BIT_CLEAR(conn->data.mask, RQ_DATA_MASK_PAYLOAD);
-	
+	BIT_CLEAR(conn->data->mask, RQ_DATA_MASK_PRIORITY);
+	BIT_CLEAR(conn->data->mask, RQ_DATA_MASK_QUEUEID);
+	BIT_CLEAR(conn->data->mask, RQ_DATA_MASK_TIMEOUT);
+	BIT_CLEAR(conn->data->mask, RQ_DATA_MASK_ID);
+	BIT_CLEAR(conn->data->mask, RQ_DATA_MASK_QUEUE);
+	BIT_CLEAR(conn->data->mask, RQ_DATA_MASK_PAYLOAD);
 }
 	
 static void cmdID(void *ptr, risp_int_t value)
@@ -1501,10 +1513,10 @@ static void cmdID(void *ptr, risp_int_t value)
 	
 	assert(conn);
 	assert(value > 0 && value <= 0xffff);
+	assert(conn->data);
 	
-	conn->data.id = value;
-	BIT_SET(conn->data.mask, RQ_DATA_MASK_ID);
-
+	conn->data->id = value;
+	BIT_SET(conn->data->mask, RQ_DATA_MASK_ID);
 }
 	
 static void cmdQueueID(void *ptr, risp_int_t value)
@@ -1513,9 +1525,10 @@ static void cmdQueueID(void *ptr, risp_int_t value)
 	
 	assert(conn);
 	assert(value > 0 && value <= 0xffff);
+	assert(conn->data);
 	
-	conn->data.qid = value;
-	BIT_SET(conn->data.mask, RQ_DATA_MASK_QUEUEID);
+	conn->data->qid = value;
+	BIT_SET(conn->data->mask, RQ_DATA_MASK_QUEUEID);
 
 }
 	
@@ -1525,9 +1538,10 @@ static void cmdTimeout(void *ptr, risp_int_t value)
 	
 	assert(conn);
 	assert(value > 0 && value <= 0xffff);
+	assert(conn->data);
 	
-	conn->data.timeout = value;
-	BIT_SET(conn->data.mask, RQ_DATA_MASK_TIMEOUT);
+	conn->data->timeout = value;
+	BIT_SET(conn->data->mask, RQ_DATA_MASK_TIMEOUT);
 }
 	
 static void cmdPriority(void *ptr, risp_int_t value)
@@ -1536,9 +1550,10 @@ static void cmdPriority(void *ptr, risp_int_t value)
 
 	assert(conn);
 	assert(value > 0 && value <= 0xffff);
+	assert(conn->data);
 	
-	conn->data.priority = value;
-	BIT_SET(conn->data.mask, RQ_DATA_MASK_PRIORITY);
+	conn->data->priority = value;
+	BIT_SET(conn->data->mask, RQ_DATA_MASK_PRIORITY);
 }
 	
 static void cmdPayload(void *ptr, risp_length_t length, risp_char_t *data)
@@ -1549,8 +1564,10 @@ static void cmdPayload(void *ptr, risp_length_t length, risp_char_t *data)
  	assert(length > 0);
  	assert(data);
 
- 	expbuf_set(conn->data.payload, data, length);
-	BIT_SET(conn->data.mask, RQ_DATA_MASK_PAYLOAD);
+	assert(conn->data);
+	assert(conn->data->payload);
+ 	expbuf_set(conn->data->payload, data, length);
+	BIT_SET(conn->data->mask, RQ_DATA_MASK_PAYLOAD);
 }
 
 
@@ -1561,9 +1578,11 @@ static void cmdQueue(void *ptr, risp_length_t length, risp_char_t *data)
  	assert(conn);
  	assert(length > 0);
  	assert(data);
- 	
- 	expbuf_set(conn->data.queue, data, length);
- 	BIT_SET(conn->data.mask, RQ_DATA_MASK_QUEUE);
+
+ 	assert(conn->data);
+ 	assert(conn->data->queue);
+ 	expbuf_set(conn->data->queue, data, length);
+ 	BIT_SET(conn->data->mask, RQ_DATA_MASK_QUEUE);
 }
 
 static void cmdInvalid(void *ptr, void *data, risp_length_t len)
@@ -1624,8 +1643,10 @@ void rq_init(rq_t *rq)
 
 
 //-----------------------------------------------------------------------------
-// Initialise a message struct.  Assumes that the struct is currently invalid.
-// Overwrites everything.
+// Return a new message struct.  Will get one from teh mempool if there are any
+// available, otherwise it will create a new entry.  Cannot assume that
+// anything left in the mempool has any valid data, so will initialise it as if
+// it was a fresh allocation.
 rq_message_t * rq_msg_new(rq_t *rq)
 {
 	rq_message_t *msg;
@@ -1648,6 +1669,9 @@ rq_message_t * rq_msg_new(rq_t *rq)
 
 	assert(rq->bufpool);
 	msg->data = expbuf_pool_new(rq->bufpool, 0);
+
+	assert(msg);
+	return(msg);
 }
 
 //-----------------------------------------------------------------------------

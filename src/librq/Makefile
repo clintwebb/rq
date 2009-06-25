@@ -2,7 +2,7 @@
 
 all: librq.so.1.0.1
 
-ARGS=
+ARGS=-g -Wall
 OBJS=librq.o
 
 librq.o: librq.c rq.h 

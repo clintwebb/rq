@@ -14,8 +14,8 @@
 // services can ensure that the correct version is installed.
 // This version number should be incremented with every change that would
 // effect logic.
-#define LIBRQ_VERSION  0x00010000
-#define LIBRQ_VERSION_NAME "v1.00.00"
+#define LIBRQ_VERSION  0x00010001
+#define LIBRQ_VERSION_NAME "v1.00.01"
 
 
 #if (LIBEVENT_VERSION_NUMBER < 0x02000100)
@@ -26,6 +26,9 @@
 	#error "Needs libmempool v1.02.00 or higher"
 #endif
 
+#if (EXPBUF_VERSION < 0x00010200)
+	#error "Needs libexpbuf v1.2.1 or higher"
+#endif
 
 /* Get a consistent bool type */
 #if HAVE_STDBOOL_H
@@ -72,7 +75,7 @@
 
 
 
-// null param (0 to 63)
+/// null param (0 to 63)
 #define RQ_CMD_NOP              0
 #define RQ_CMD_CLEAR            1
 #define RQ_CMD_EXECUTE          2
@@ -84,29 +87,29 @@
 #define RQ_CMD_RECEIVED         12
 #define RQ_CMD_DELIVERED        13
 #define RQ_CMD_BROADCAST        14
-#define RQ_CMD_UNDELIVERED      15
+#define RQ_CMD_NOREPLY          15
+#define RQ_CMD_UNDELIVERED      16
 
 #define RQ_CMD_CONSUME          20
 #define RQ_CMD_CANCEL_QUEUE     21
 #define RQ_CMD_CLOSING          22
 #define RQ_CMD_SERVER_FULL      23
 
-#define RQ_CMD_NOREPLY          30
 #define RQ_CMD_EXCLUSIVE        31
 
-// byte integer (64 to 95)
+/// byte integer (64 to 95)
 #define RQ_CMD_PRIORITY         64
 #define RQ_CMD_RETRIES					65
-// short integer (96 to 127)
+/// short integer (96 to 127)
 #define RQ_CMD_QUEUEID          96
 #define RQ_CMD_TIMEOUT          97
 #define RQ_CMD_MAX              98
-// large integer (128 to 159 
+/// large integer (128 to 159 
 #define RQ_CMD_ID               128
-// short string (160 to 192)
+/// short string (160 to 192)
 #define RQ_CMD_QUEUE            160
-// string (192 to 223)
-// large string (224 to 255)
+/// string (192 to 223)
+/// large string (224 to 255)
 #define RQ_CMD_PAYLOAD          224
 
 
@@ -198,7 +201,7 @@ typedef struct {
 	char *hostname;
 	
 	expbuf_t *inbuf, *outbuf, *readbuf;
-	rq_data_t data;
+	rq_data_t *data;
 	
 	// linked-lists of the messages that are being processed.
 	list_t *in_msgs, *out_msgs;
