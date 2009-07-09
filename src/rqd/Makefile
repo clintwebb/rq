@@ -33,7 +33,7 @@ OBJS=rqd.o daemon.o settings.o \
 #DEBUG_LIBS=-lefence -lpthread
 DEBUG_LIBS=
 
-LIBS=-lrisp -levlogging -levent -lexpbuf -lexpbufpool -lrispbuf -lrq -lmempool -llinklist $(DEBUG_LIBS)
+LIBS=-lrisp -levlogging -levent_core -lexpbuf -lexpbufpool -lrispbuf -lrq -lmempool -llinklist $(DEBUG_LIBS)
 
 rqd: $(OBJS)
 	gcc -o $@ $(ARGS) $(OBJS) $(LIBS) 

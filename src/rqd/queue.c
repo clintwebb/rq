@@ -36,6 +36,7 @@ void queue_init(queue_t *queue)
 	ll_init(&queue->nodes_busy);
 	ll_init(&queue->nodes_ready);
 	ll_init(&queue->nodes_waiting);
+	ll_init(&queue->nodes_consuming);
 	
 	queue->sysdata = NULL;
 }
@@ -57,6 +58,7 @@ void queue_free(queue_t *queue)
 	ll_free(&queue->nodes_busy);
 	ll_free(&queue->nodes_ready);
 	ll_free(&queue->nodes_waiting);
+	ll_free(&queue->nodes_consuming);
 }
 
 
@@ -138,15 +140,99 @@ void queue_addmsg(queue_t *queue, message_t *msg)
 	// add the message to the queue
 	ll_push_tail(&queue->msg_pending, msg);
 
-	// if the only message in the list is the one we just added, then we will create an action to process it.
+	// if the only message in the list is the one we just added, then we will
+	// deliver it now.
 	if (ll_count(&queue->msg_pending) == 1) {
 		queue_deliver(queue);
 	}
 }
 
+//-----------------------------------------------------------------------------
+// Check to see if a particular node is consuming the queue.  The node itself
+// does not know what queues it is consuming, so we must go thru the list that
+// the queue has.
+// Returns 0 if it is not in any of the lists for the queue.
+// Otherwise returns 1 if it is either ready or busy, and -1 if it is in the
+// waiting list.
+int queue_check_node(queue_t *queue, node_t *node)
+{
+	int found = 0;
+	node_queue_t *nq;
+	node_t *tmp;
+	void *next;
+
+	assert(queue);
+	assert(node);
+
+	next = ll_start(&queue->nodes_ready);
+	nq = ll_next(&queue->nodes_ready, &next);
+	while (nq) {
+		assert(nq->node);
+		if (nq->node == node) {
+			found = 1;
+			nq = NULL;
+		}
+		else {
+			nq = ll_next(&queue->nodes_ready, &next);
+		}
+	}
+	assert(found >= 0);
+
+	if (found == 0) {
+		next = ll_start(&queue->nodes_busy);
+		nq = ll_next(&queue->nodes_busy, &next);
+		while (nq) {
+			assert(nq->node);
+			if (nq->node == node) {
+				found = 1;
+				nq = NULL;
+			}
+			else {
+				nq = ll_next(&queue->nodes_busy, &next);
+			}
+		}
+		assert(found >= 0);
+
+		if (found == 0) {
+			next = ll_start(&queue->nodes_waiting);
+			nq = ll_next(&queue->nodes_waiting, &next);
+			while (nq) {
+				assert(nq->node);
+				if (nq->node == node) {
+					found = -1;
+					nq = NULL;
+				}
+				else {
+					nq = ll_next(&queue->nodes_waiting, &next);
+				}
+			}
+
+			if (found == 0) {
+				next = ll_start(&queue->nodes_consuming);
+				tmp = ll_next(&queue->nodes_consuming, &next);
+				while (tmp) {
+					if (tmp == node) {
+						found = -2;
+						tmp = NULL;
+					}
+					else {
+						tmp = ll_next(&queue->nodes_consuming, &next);
+					}
+				}
+				assert(found <= 0);
+			}
+		}
+		assert(found <= 0);
+	}
+
+	return(found);
+}
 
 
-// this function will look at the flags for the queue, and if we need to 
+//-----------------------------------------------------------------------------
+// This function will send consume requests for this queue to all the connected
+// controllers.  However, before sending the request we need to check to see if
+// the controller is already consuming the queue...
 static void queue_notify(queue_t *queue)
 {
 	node_t *node;
@@ -166,12 +252,21 @@ static void queue_notify(queue_t *queue)
 		
 		if (BIT_TEST(node->flags, FLAG_NODE_CONTROLLER)) {
 
+			assert(node->controller);
+	
 			exclusive = 0;
 			if (BIT_TEST(queue->flags, QUEUE_FLAG_EXCLUSIVE)) {
 				exclusive = 1;
 			}
-		
-			sendConsume(node, queue->name, 1, QUEUE_LOW_PRIORITY, exclusive);
+
+			if (queue_check_node(queue, node) == 0) {
+				sendConsume(node, queue->name, 1, QUEUE_LOW_PRIORITY, exclusive);
+				ll_push_head(&queue->nodes_consuming, node);
+				logger(node->sysdata->logging, 2, "Sending consume of '%s' to controller node %d", queue->name, node->handle);
+			}
+		}
+		else {
+			assert(node->controller == NULL);
 		}
 		
 		node = ll_next(queue->sysdata->nodelist, &next);
@@ -188,7 +283,8 @@ void queue_cancel_node(node_t *node)
 	queue_t *queue;
 	node_queue_t *nq;
 	int found;
-	void *next_queue, *next_node;
+	void *next_queue;
+	void *next_node;
 	
 	assert(node);
 	assert(node->sysdata);
@@ -201,7 +297,7 @@ void queue_cancel_node(node_t *node)
 
 		found = 0;
 		
-		// need to check this node in the busy
+		// need to check this node in the busy list.
 		next_node = ll_start(&queue->nodes_busy);
 		nq = ll_next(&queue->nodes_busy, &next_node);
 		while (nq && found == 0) {
@@ -222,27 +318,29 @@ void queue_cancel_node(node_t *node)
 		}
 		
 		// ready
-		next_node = ll_start(&queue->nodes_ready);
-		nq = ll_next(&queue->nodes_ready, &next_node);
-		while (nq && found == 0) {
-
-			assert(nq->node);
-			if (nq->node == node) {
-				logger(node->sysdata->logging, 2,
-					"queue %d:'%s' removing node:%d from ready list",
-					queue->qid, queue->name, node->handle);
-
-				ll_remove(&queue->nodes_ready, nq, next_node);
-				
-				free(nq);
-				nq = NULL;
-				found++;
-			}
-			else {
-				nq = ll_next(&queue->nodes_ready, &next_node);
+		if (found == 0) {
+			next_node = ll_start(&queue->nodes_ready);
+			nq = ll_next(&queue->nodes_ready, &next_node);
+			while (nq && found == 0) {
+	
+				assert(nq->node);
+				if (nq->node == node) {
+					logger(node->sysdata->logging, 2,
+						"queue %d:'%s' removing node:%d from ready list",
+						queue->qid, queue->name, node->handle);
+	
+					ll_remove(&queue->nodes_ready, nq, next_node);
+					
+					free(nq);
+					nq = NULL;
+					found++;
+				}
+				else {
+					nq = ll_next(&queue->nodes_ready, &next_node);
+				}
 			}
 		}
-
+		
 		if (found != 0) {
 			// The node was found already.  If the queue was in exclusive mode, need
 			// to update the lists and activate the one that is waiting.
@@ -278,6 +376,7 @@ void queue_cancel_node(node_t *node)
 			}
 		}
 		else {
+			assert(found == 0);
 		
 			// and waiting list.
 			next_node = ll_start(&queue->nodes_waiting);
@@ -304,6 +403,7 @@ void queue_cancel_node(node_t *node)
 		
 		// the node has being removed from the queue, if there are no more nodes, and there are no messages in the queue, then the queue needs to be deleted.
 		if (ll_count(&queue->nodes_busy) <= 0 && ll_count(&queue->nodes_ready) == 0) {
+
 			if (ll_count(&queue->nodes_waiting) > 0) {
 				// we dont have any active nodes anymore, but we have a waiting node... we need to activate the waiting node.
 				assert(0);
@@ -381,23 +481,20 @@ int queue_add_node(queue_t *queue, node_t *node, int max, int priority, unsigned
 	nq->priority = priority;
 	nq->waiting = 0;
 
-
 	// check to see if the current queue settings are for it to be
 	// exclusive.   If so, then we will need to add this node to the waiting
 	// list.
-	if (BIT_TEST(queue->flags, QUEUE_FLAG_EXCLUSIVE) || ll_count(&queue->nodes_ready) > 0 || ll_count(&queue->nodes_busy) > 0) {
-		// The queue is already in exclusive mode (or already has members that
-		// are not exlusive).  So this node would need to be added to the
-		// waiting list.
+	if (BIT_TEST(queue->flags, QUEUE_FLAG_EXCLUSIVE) && (ll_count(&queue->nodes_busy) > 0 || ll_count(&queue->nodes_ready) > 0)) {
+		// The queue is already in exclusive mode, and we have nodes processing
+		// it, so this node would need to be added to the waiting list.
 
 		ll_push_head(&queue->nodes_waiting, nq);
-
 		logger(node->sysdata->logging, 2, "processConsume - Defered, queue already consumed exclusively.");
-
 		return (0);
 	}
 	else {
-			
+		assert(ll_count(&queue->nodes_waiting) == 0);
+
 		// if the consume request was for an EXCLUSIVE queue (and since we got
 		// this far it means that no other nodes are consuming this queue yet),
 		// then we mark it as exclusive.

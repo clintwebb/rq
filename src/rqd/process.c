@@ -129,7 +129,7 @@ void processConsume(node_t *node)
  	queue_t *q=NULL;
  	int max;
  	int priority;
- 	unsigned int flags;
+ 	unsigned int qflags;
 	
 	assert(node);
 	assert(node->sysdata);
@@ -142,7 +142,7 @@ void processConsume(node_t *node)
 			"Processing QUEUE request from node:%d", node->handle);
 
 		assert(BIT_TEST(node->data.mask, DATA_MASK_QUEUE));
-		assert(node->data.queue.length > 0);
+		assert(BUF_LENGTH(&node->data.queue) > 0);
 	
 		// check to see if we already have a queue with this name, in our list.		
 		assert(q == NULL);
@@ -164,7 +164,7 @@ void processConsume(node_t *node)
 
 		max = 0;
 		priority = 0;
-		flags = 0;
+		qflags = 0;
 
 		if (BIT_TEST(node->data.mask, DATA_MASK_MAX))
 			max = node->data.max;
@@ -173,14 +173,13 @@ void processConsume(node_t *node)
 			priority = node->data.priority;
 			
 		if (BIT_TEST(node->data.flags, DATA_FLAG_EXCLUSIVE))
-			BIT_SET(flags, QUEUE_FLAG_EXCLUSIVE);
+			BIT_SET(qflags, QUEUE_FLAG_EXCLUSIVE);
 		
-		if (queue_add_node(q, node, max, priority, flags) > 0) {
+		if (queue_add_node(q, node, max, priority, qflags) > 0) {
 			// send reply back to the node.
 			sendConsumeReply(node, q->name, q->qid);
 		}
 
-	
 		// need to check the queue to see if there are messages pending.  If there
 		// are, then send some to this node.
 		if (ll_count(&q->msg_pending) > 0) {
@@ -202,16 +201,20 @@ void processClosing(node_t *node)
 	// not have pending requests for this node.
 	queue_cancel_node(node);
 
-	// if this is a regular consumer, we would close the socket if there are no replies that are ready to go down the pipe.
+	// if this is a regular consumer, we would close the socket if there are no
+	// replies that are ready to go down the pipe.
 	if (ll_count(&node->out_msg) > 0) {
 		assert(0);
 	}
 
-	// mark the node as closing so that as soon as all the messages have completed, the node can be shutdown.
+	// mark the node as closing so that as soon as all the messages have
+	// completed, the node can be shutdown.
 	assert(BIT_TEST(node->flags, FLAG_NODE_CLOSING) == 0);
 	BIT_SET(node->flags, FLAG_NODE_CLOSING);
 
-	// if this node is a controller, then we may need to do something to handle it.  Although it is likely that nothign would be done until the connection is actually lost.
+	// if this node is a controller, then we may need to do something to handle
+	// it.  Although it is likely that nothign would be done until the
+	// connection is actually lost.
 	if (BIT_TEST(node->flags, FLAG_NODE_CONTROLLER)) {
 		// what do we need to do special to handle the closing of a controller node?
 		// nothing really... that would be done when the connection is actually closed.

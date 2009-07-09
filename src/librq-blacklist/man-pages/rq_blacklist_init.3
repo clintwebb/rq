@@ -1,0 +1,54 @@
+.\" man page for libmempool
+.\" Contact dev@hyper-active.com.au to correct errors or omissions. 
+.TH mempool_init 3 "29 May 2009" "1.02" "Library for handling a pool of various sized memory pointers."
+.SH NAME
+mempool_init \- Initialise the mempool control structure.
+.SH SYNOPSIS
+#include <mempool.h>
+.sp
+.B void mempool_init(mempool_t *pool);
+.br
+.SH DESCRIPTION
+.B mempool_init()
+is used to used to initialise the structure so that it is ready for use.  When the pool is no longer needed,
+.B mempool_free()
+should be called, which will release any resources that had been allocated to the pool (which means it will do a
+.B free()
+on every pointer stored in the pool).
+.SH EXAMPLES
+#include <mempool.h>
+.sp
+int main(void) {
+.br
+	mempool_t *msgpool;
+.sp
+	msgpool = (mempool_t *) malloc(sizeof(mempool_t));
+.br
+.B 	mempool_init
+(msgpool);
+.sp
+	/* do stuff with the msgpool */
+.sp
+	mempool_free(msgpool);
+.br
+	free(msgpool);
+.br
+	msgpool = NULL;
+.br
+	return(0);
+.br
+}
+.SH SEE ALSO
+.BR libmempool (3),
+.BR mempool_free (3)
+.SH BUGS
+No known bugs at this time. 
+.SH AUTHOR
+.nf
+Clint Webb (webb.clint@gmail.com)
+on behalf of Hyper-Active Systems, Australia.
+.br
+http://www.hyper-active.com.au/libmempool/
+.fi
+.SH HISTORY
+May 29, 2009 \- v1.02, Manpage created.

@@ -156,7 +156,7 @@ static void server_listen_ai(server_t *server, struct addrinfo *ai)
 		}
 	}
 
-	assert((server->handle == INVALID_HANDLE && server->event == NULL) || (server->event >= 0 && server->event));
+	assert((server->handle == INVALID_HANDLE && server->event == NULL) || (server->handle >= 0 && server->event));
 }
 
 
