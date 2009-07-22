@@ -55,10 +55,6 @@ typedef struct {
 
 
 
-typedef struct {
-	list_t *hosts;
-	list_t *aliases;
-} config_t;
 
 
 typedef struct {
@@ -79,10 +75,6 @@ typedef struct {
 	config_host_t *host;
 } config_alias_t;
 
-typedef struct {
-	config_t *config;
-	config_host_t *host;
-} config_combo_t;
 
 
 
@@ -91,11 +83,9 @@ typedef struct {
 
 typedef struct {
 	struct event_base *evbase;
-	rq_t              *rq;
-	risp_t						*risp;
-	settings_t        *settings;
-	config_t          *config;
-	expbuf_pool_t     *bufpool;
+	rq_service_t *rqsvc;
+	risp_t *risp;
+	char *configfile;
 
 	struct event *sigint_event;
 	struct event *sighup_event;
@@ -103,69 +93,50 @@ typedef struct {
 	rq_message_t *req;
 	expbuf_t *reply;
 
+	// data we get from the controller.
 	char *host;
 	int host_len;
 	char *path;
 	int path_len;
 
+	list_t *hosts;
+	list_t *aliases;
+
 } control_t;
 
 
-
-
-//-----------------------------------------------------------------------------
-// print some info to the user, so that they can know what the parameters do.
-void usage(void) {
-	printf(PACKAGE " " VERSION "\n");
-	printf("-f <filename>       Sqlite3 config file.\n");
-	printf("\n");
-	printf("-c <ip:port>        Controller to connect to.\n");
-	printf("\n");
-	printf("-d                  run as a daemon\n");
-	printf("-P <file>           save PID in <file>, only used with -d option\n");
-	printf("-u <username>       assume identity of <username> (only when run as root)\n");
-	printf("\n");
-	printf("-v                  verbose (print errors/warnings while in event loop)\n");
-	printf("-h                  print this help and exit\n");
-	return;
-}
+typedef struct {
+	control_t *control;
+	config_host_t *host;
+} config_combo_t;
 
 
 
-// Initialise the 
-void config_init(config_t *config)
-{
-	assert(config);
-	config->hosts = NULL;
-	config->aliases = NULL;
-}
 
-static void config_unload(config_t *config)
+static void config_unload(control_t *control)
 {
 	config_host_t *host;
 	config_alias_t *alias;
 	config_path_t *path;
 	
-	assert(config);
-		
+	assert(control);
 
-
-	if (config->aliases) {
-		while ((alias = ll_pop_head(config->aliases))) {
+	if (control->aliases) {
+		while ((alias = ll_pop_head(control->aliases))) {
 			assert(alias->alias);
 			free(alias->alias);
 			alias->alias = NULL;
 			alias->host = NULL;
 			free(alias);
 		}
-		ll_free(config->aliases);
-		free(config->aliases);
-		config->aliases = NULL;
+		ll_free(control->aliases);
+		free(control->aliases);
+		control->aliases = NULL;
 	}
 
 		
-	if (config->hosts) {
-		while ((host = ll_pop_head(config->hosts))) {
+	if (control->hosts) {
+		while ((host = ll_pop_head(control->hosts))) {
 
 			assert(host->host_id > 0);
 			
@@ -195,31 +166,19 @@ static void config_unload(config_t *config)
 			
 			free(host);
 		}
-		ll_free(config->hosts);
-		free(config->hosts);
-		config->hosts = NULL;
+		ll_free(control->hosts);
+		free(control->hosts);
+		control->hosts = NULL;
 	}
 }
-
-
-void config_free(config_t *config)
-{
-	
-	assert(config);
-	if (config->hosts || config->aliases) {
-		config_unload(config);
-	}
-}
-
-
 
 
 static int host_callback(void *ptr, int argc, char **argv, char **cols)
 {
-  config_t *config = ptr;
+  control_t *control = ptr;
   config_host_t *host;
 
-	assert(config);
+	assert(control);
 	assert(argc > 0);
 	assert(argv && cols);
 
@@ -233,33 +192,33 @@ static int host_callback(void *ptr, int argc, char **argv, char **cols)
 	host->consumer = argv[1] ? strdup(argv[1]) : NULL;
 	host->paths = NULL;
 
-	assert(config->hosts);
-	ll_push_head(config->hosts, host);
+	assert(control->hosts);
+	ll_push_head(control->hosts, host);
 	
   return 0;
 }
 
 
 
-int config_load_hosts(config_t *config, sqlite3 *dbh)
+int config_load_hosts(control_t *control, sqlite3 *dbh)
 {
 	int loop;
 	int rc;
 	char *errmsg;
 	
-	assert(config);
+	assert(control);
 	assert(dbh);
 
-	assert(config->aliases == NULL);
+	assert(control->aliases == NULL);
 	
-	assert(config->hosts == NULL);
-	config->hosts = (list_t *) malloc(sizeof(list_t));
-	ll_init(config->hosts);
+	assert(control->hosts == NULL);
+	control->hosts = (list_t *) malloc(sizeof(list_t));
+	ll_init(control->hosts);
 
 	loop = 1;
 	while (loop != 0) {
 		errmsg = NULL;
-		rc = sqlite3_exec(dbh, "SELECT HostID, Consumer FROM Hosts ORDER BY HostID", host_callback, config, &errmsg);
+		rc = sqlite3_exec(dbh, "SELECT HostID, Consumer FROM Hosts ORDER BY HostID", host_callback, control, &errmsg);
 		if (rc != SQLITE_BUSY && rc != SQLITE_LOCKED) {
 			
 			// indicate that we dont want to loop any more.
@@ -269,26 +228,26 @@ int config_load_hosts(config_t *config, sqlite3 *dbh)
 				fprintf(stderr, "SQL error: %s\n", errmsg);
 				sqlite3_free(errmsg);
 				errmsg = NULL;
-				assert(ll_count(config->hosts) == 0);
+				assert(ll_count(control->hosts) == 0);
 			}
 		}
 		assert(errmsg == NULL);
 	}
 
 	// at this point we should have host entries.
-	if (ll_count(config->hosts) == 0) {
+	if (ll_count(control->hosts) == 0) {
 		fprintf(stderr, "config does not contain any hosts\n");
 
-		ll_free(config->hosts);
-		free(config->hosts);
-		config->hosts = NULL;
+		ll_free(control->hosts);
+		free(control->hosts);
+		control->hosts = NULL;
 		
-		assert(config->aliases == NULL);
+		assert(control->aliases == NULL);
 
 		return -1;
 	}
 	else {
-		assert(config->aliases == NULL);
+		assert(control->aliases == NULL);
 		return 0;
 	}
 }
@@ -300,7 +259,7 @@ static int alias_callback(void *ptr, int argc, char **argv, char **cols)
   config_alias_t *alias;
 
 	assert(combo);
-	assert(combo->config);
+	assert(combo->control);
 	assert(combo->host);
 	assert(argc > 0);
 	assert(argv && cols);
@@ -316,8 +275,8 @@ static int alias_callback(void *ptr, int argc, char **argv, char **cols)
 	assert(alias->length > 0);
 	alias->host = combo->host;
 
-	assert(combo->config->aliases);
-	ll_push_head(combo->config->aliases, alias);
+	assert(combo->control->aliases);
+	ll_push_head(combo->control->aliases, alias);
 
   return 0;
 }
@@ -327,31 +286,30 @@ static int alias_callback(void *ptr, int argc, char **argv, char **cols)
 
 // load the aliases.  It will do a query per host entry.
 #define QUERY_LEN 1024
-static int config_load_aliases(config_t *config, sqlite3 *dbh)
+static int config_load_aliases(control_t *control, sqlite3 *dbh)
 {
 	int rc;
 	config_host_t *host;
-	void *next;
 	unsigned char loop;
 	char *errmsg;
 	char query[QUERY_LEN];
 	config_combo_t combo;
 
-	assert(config);
+	assert(control);
 	assert(dbh);
 	
-	assert(config->aliases == NULL);
-	config->aliases = (list_t *) malloc(sizeof(list_t));
-	ll_init(config->aliases);
+	assert(control->aliases == NULL);
+	control->aliases = (list_t *) malloc(sizeof(list_t));
+	ll_init(control->aliases);
 
-	assert(config->hosts);
-	next = ll_start(config->hosts);
-	while ((host = ll_next(config->hosts, &next))) {
+	assert(control->hosts);
+	ll_start(control->hosts);
+	while ((host = ll_next(control->hosts))) {
 
 		assert(host->host_id > 0);
 		snprintf(query, QUERY_LEN, "SELECT Alias FROM Aliases WHERE HostID=%d ORDER BY AliasID", host->host_id);
 
-		combo.config = config;
+		combo.control = control;
 		combo.host = host;		
 	
 		loop = 1;
@@ -366,12 +324,13 @@ static int config_load_aliases(config_t *config, sqlite3 *dbh)
 					fprintf(stderr, "SQL error: %s\n", errmsg);
 					sqlite3_free(errmsg);
 					errmsg = NULL;
-					assert(ll_count(config->hosts) == 0);
+					assert(ll_count(control->hosts) == 0);
 				}
 			}
 			assert(errmsg == NULL);
 		}
 	}
+	ll_finish(control->hosts);
 
 	return 0;
 }
@@ -416,21 +375,20 @@ static int paths_callback(void *ptr, int argc, char **argv, char **cols)
 
 // load the aliases.  It will do a query per host entry.
 #define QUERY_LEN 1024
-static int config_load_paths(config_t *config, sqlite3 *dbh)
+static int config_load_paths(control_t *control, sqlite3 *dbh)
 {
 	int rc;
 	config_host_t *host;
-	void *next;
 	unsigned char loop;
 	char *errmsg;
 	char query[QUERY_LEN];
 
-	assert(config);
+	assert(control);
 	assert(dbh);
 	
-	assert(config->hosts);
-	next = ll_start(config->hosts);
-	while ((host = ll_next(config->hosts, &next))) {
+	assert(control->hosts);
+	ll_start(control->hosts);
+	while ((host = ll_next(control->hosts))) {
 
 		assert(host->host_id > 0);
 		snprintf(query, QUERY_LEN, "SELECT Path, Consumer FROM Paths WHERE HostID=%d ORDER BY Path", host->host_id);
@@ -451,12 +409,13 @@ static int config_load_paths(config_t *config, sqlite3 *dbh)
 					fprintf(stderr, "SQL error: %s\n", errmsg);
 					sqlite3_free(errmsg);
 					errmsg = NULL;
-					assert(ll_count(config->hosts) == 0);
+					assert(ll_count(control->hosts) == 0);
 				}
 			}
 			assert(errmsg == NULL);
 		}
 	}
+	ll_finish(control->hosts);
 
 	return 0;
 }
@@ -465,18 +424,18 @@ static int config_load_paths(config_t *config, sqlite3 *dbh)
 
 
 
-static int config_load(config_t *config, const char *configfile)
+static int config_load(control_t *control)
 {
 	int rc;
 	sqlite3 *dbh;
 	
-	assert(config);
-	assert(configfile);
+	assert(control);
+	assert(control->configfile);
 
-	assert(config->hosts == NULL);
+	assert(control->hosts == NULL);
 	
 	dbh = NULL;
-	rc = sqlite3_open(configfile, &dbh);
+	rc = sqlite3_open(control->configfile, &dbh);
 	assert(dbh);
 	if (rc != SQLITE_OK) {
 		sqlite3_close(dbh);
@@ -487,21 +446,21 @@ static int config_load(config_t *config, const char *configfile)
 		assert(rc == SQLITE_OK);
 
 		// get the list of hosts from the database.
-		if (config_load_hosts(config, dbh) < 0) {
+		if (config_load_hosts(control, dbh) < 0) {
 			// error
 			sqlite3_close(dbh);
-			assert(config->hosts == NULL);
+			assert(control->hosts == NULL);
 			return -1;
 		}
 		else {
-			if (config_load_aliases(config, dbh) < 0) {
+			if (config_load_aliases(control, dbh) < 0) {
 				// error.
 				sqlite3_close(dbh);
-				assert(config->aliases);
+				assert(control->aliases);
 				return -1;
 			}
 			else {
-				if (config_load_paths(config, dbh) < 0) {
+				if (config_load_paths(control, dbh) < 0) {
 					// error.
 					sqlite3_close(dbh);
 					return -1;
@@ -517,51 +476,12 @@ static int config_load(config_t *config, const char *configfile)
 }
 
 
-
-
-
-static void settings_init(settings_t *ptr)
-{
-	assert(ptr != NULL);
-
-	ptr->verbose = false;
-	ptr->daemonize = false;
-	ptr->username = NULL;
-	ptr->pid_file = NULL;
-
-	ptr->configfile = NULL;
-	ptr->queue = NULL;
-
-	ptr->controllers = (list_t *) malloc(sizeof(list_t));
-	ll_init(ptr->controllers);
-}
-
-static void settings_free(settings_t *ptr)
-{
-	assert(ptr != NULL);
-
-	if (ptr->configfile) { free(ptr->configfile); ptr->configfile = NULL; }
-	if (ptr->queue) { free(ptr->queue); ptr->queue = NULL; }
-
-	assert(ptr->controllers);
-	ll_free(ptr->controllers);
-	free(ptr->controllers);
-	ptr->controllers = NULL;
-}
-
-
-
-
 //-----------------------------------------------------------------------------
 static void sigint_handler(evutil_socket_t fd, short what, void *arg)
 {
  	control_t *control = (control_t *) arg;
 
 	assert(arg);
-
-	// need to initiate an RQ shutdown.
-	assert(control->rq);
-	rq_shutdown(control->rq);
 
 	// delete the signal events.
 	assert(control->sigint_event);
@@ -571,6 +491,10 @@ static void sigint_handler(evutil_socket_t fd, short what, void *arg)
 	assert(control->sighup_event);
 	event_free(control->sighup_event);
 	control->sighup_event = NULL;
+
+	// need to initiate an RQ shutdown.
+	assert(control->rqsvc);
+	rq_svc_shutdown(control->rqsvc);
 }
 
 
@@ -581,7 +505,7 @@ static void sigint_handler(evutil_socket_t fd, short what, void *arg)
 // possible.
 static void sighup_handler(evutil_socket_t fd, short what, void *arg)
 {
- 	control_t *control = (control_t *) arg;
+// 	control_t *control = (control_t *) arg;
 
 	assert(arg);
 
@@ -618,7 +542,6 @@ static void message_handler(rq_message_t *msg, void *arg)
 	assert(control->req == NULL);
 	control->req = msg;
 
-	assert(control->rq == msg->rq);
 
 	assert(control->risp);
 	assert(msg->data);
@@ -674,7 +597,6 @@ static char * check_path(list_t *paths, int path_len, char *pathstr)
 {
 	char *queue = NULL;
 	int count;
-	void *next;
 	config_path_t *path;
 
 	assert(paths);
@@ -683,8 +605,8 @@ static char * check_path(list_t *paths, int path_len, char *pathstr)
 
 	count = 0;
 	assert(paths);
-	next = ll_start(paths);
-	path = ll_next(paths, &next);
+	ll_start(paths);
+	path = ll_next(paths);
 	while (path) {
 		assert(path->length > 0);
 		assert(path->path);
@@ -700,15 +622,16 @@ static char * check_path(list_t *paths, int path_len, char *pathstr)
 				// if the path is not at the top of the list, we will move it to
 				// the top so that it will be found faster in the future.
 				if (count > 1) {
-					ll_remove(paths, path, &next);
+					ll_remove(paths, path);
 					ll_push_head(paths, path);
 				}
 			}
 		}
 
-		if (queue == NULL) { path = ll_next(paths, &next); }
+		if (queue == NULL) { path = ll_next(paths); }
 		else               { path = NULL; }
 	}
+	ll_finish(paths);
 
 	return(queue);
 }
@@ -766,7 +689,6 @@ static void cmdExecute(control_t *ptr)
 	config_alias_t *alias;
 	config_host_t *host;
 	char *queue;
-	void *next;
 	int count;
 	int redirect;
 	char *tmppath = NULL;
@@ -785,13 +707,12 @@ static void cmdExecute(control_t *ptr)
 		
 		// find the host object.
 		assert(ptr->host);
-		assert(ptr->config);
-		assert(ptr->config->aliases);
+		assert(ptr->aliases);
 
 		count = 0;
 		host = NULL;
-		next = ll_start(ptr->config->aliases);
-		alias = ll_next(ptr->config->aliases, &next);
+		ll_start(ptr->aliases);
+		alias = ll_next(ptr->aliases);
 		while (alias) {
 			assert(alias->alias);
 			assert(alias->length > 0);
@@ -808,21 +729,22 @@ static void cmdExecute(control_t *ptr)
 					// the top of the list to improve searching speed for the most used
 					// host names.
 					if (count > 1) {
-						ll_remove(ptr->config->aliases, alias, &next);
-						ll_push_head(ptr->config->aliases, alias);
+						ll_remove(ptr->aliases, alias);
+						ll_push_head(ptr->aliases, alias);
 					}
 
 					// we found what we are looking for, we dont need to search through the list anymore.
 					alias = NULL;
 				}
 				else {
-					alias = ll_next(ptr->config->aliases, &next);
+					alias = ll_next(ptr->aliases);
 				}
 			}
 			else {
-				alias = ll_next(ptr->config->aliases, &next);
+				alias = ll_next(ptr->aliases);
 			}
 		}
+		ll_finish(ptr->aliases);
 	
 		// check the config tables for the host/path combo.
 		if (host) {
@@ -1004,10 +926,9 @@ static void init_control(control_t *control)
 {
 	assert(control != NULL);
 
-	control->rq = NULL;
+	control->rqsvc = NULL;
 	control->risp = NULL;
-	control->settings = NULL;
-	control->bufpool = NULL;
+	control->configfile = NULL;
 
 	control->sigint_event = NULL;
 	control->sighup_event = NULL;
@@ -1020,17 +941,23 @@ static void init_control(control_t *control)
 	
 	control->reply = (expbuf_t *) malloc(sizeof(expbuf_t));
 	expbuf_init(control->reply, 0);
+
+	control->hosts = NULL;
+	control->aliases = NULL;
 }
 
 static void cleanup_control(control_t *control)
 {
-	assert(control != NULL);
+	assert(control);
+
+	config_unload(control);
 
 	assert(control->reply);
 	expbuf_clear(control->reply);
 	expbuf_free(control->reply);
 	free(control->reply);
 	control->reply = NULL;
+	control->configfile = NULL;
 
 	control->host = NULL;
 	control->path = NULL;
@@ -1038,341 +965,10 @@ static void cleanup_control(control_t *control)
 	control->path_len = 0;
 
 	assert(control->req == NULL);
-	assert(control->bufpool == NULL);
-	assert(control->settings == NULL);
-	assert(control->rq == NULL);
 	assert(control->risp == NULL);
 	assert(control->sigint_event == NULL);
 	assert(control->sighup_event == NULL);
 }
-
-static void init_settings(control_t *control)
-{
-	assert(control);
-	assert(control->settings == NULL);
-	control->settings = (settings_t *) malloc(sizeof(settings_t));
-	settings_init(control->settings);
-}
-
-static void cleanup_settings(control_t *control)
-{
-	assert(control);
-	assert(control->settings);
-	settings_free(control->settings);
-	free(control->settings);
-	control->settings = NULL;
-}
-
-//-----------------------------------------------------------------------------
-// Check the settings that we have received and generate an error if we dont
-// have enough.
-static void check_settings(control_t *control)
-{
-	assert(control);
-	assert(control->settings);
-
-	assert(control->settings->controllers);
-	if (ll_count(control->settings->controllers) == 0) {
-		fprintf(stderr, "Need at least one controller specified.\n");
-		exit(EXIT_FAILURE);
-	}
-
-	if (control->settings->queue == NULL) {
-		fprintf(stderr, "Need to specify a queue.\n");
-		exit(EXIT_FAILURE);
-	}
-	
-	if (control->settings->configfile == NULL) {
-		fprintf(stderr, "Need to specify a path for the config db file.\n");
-		exit(EXIT_FAILURE);
-	}
-}
-
-//-----------------------------------------------------------------------------
-// If we need to run as a daemon, then do so, dropping privs to a specific
-// username if it was specified, and creating a pid file, if that was
-// specified.
-static void init_daemon(control_t *control)
-{
-	assert(control);
-	assert(control->settings);
-
-	if (control->settings->daemonize) {
-		if (rq_daemon(control->settings->username, control->settings->pid_file, control->settings->verbose) != 0) {
-			fprintf(stderr, "failed to daemon() in order to daemonize\n");
-			exit(EXIT_FAILURE);
-		}
-	}
-}
-	
-// remove the PID file if we're a daemon
-static void cleanup_daemon(control_t *control)
-{
-	assert(control);
-	assert(control->settings);
-	
-	if (control->settings->daemonize && control->settings->pid_file) {
-		assert(control->settings->pid_file[0] != 0);
-		unlink(control->settings->pid_file);
-	}
-}
-
-//-----------------------------------------------------------------------------
-static void init_events(control_t *control)
-{
-	assert(control->evbase == NULL);
-	control->evbase = event_base_new();
-	assert(control->evbase);
-}
-
-//-----------------------------------------------------------------------------
-static void cleanup_events(control_t *control)
-{
-	assert(control);
-	assert(control->evbase);
-
-	event_base_free(control->evbase);
-	control->evbase = NULL;
-}
-
-
-//-----------------------------------------------------------------------------
-static void init_rq(control_t *control)
-{
-	assert(control);
-	assert(control->rq == NULL);
-
-	control->rq = (rq_t *) malloc(sizeof(rq_t));
-	rq_init(control->rq);
-
-	assert(control->evbase);
-	assert(control->rq);
-	rq_setevbase(control->rq, control->evbase);
-}
-
-//-----------------------------------------------------------------------------
-static void cleanup_rq(control_t *control)
-{
-	assert(control);
-	assert(control->rq);
-
-	rq_cleanup(control->rq);
-	free(control->rq);
-	control->rq = NULL;
-}
-
-
-//-----------------------------------------------------------------------------
-static void init_signals(control_t *control)
-{
-	assert(control);
-	assert(control->evbase);
-	
-	assert(control->sigint_event == NULL);
-	control->sigint_event = evsignal_new(control->evbase, SIGINT, sigint_handler, control);
-	assert(control->sigint_event);
-	event_add(control->sigint_event, NULL);
-
-	assert(control->sighup_event == NULL);
-	control->sighup_event = evsignal_new(control->evbase, SIGINT, sighup_handler, control);
-	assert(control->sighup_event);
-	event_add(control->sighup_event, NULL);
-}
-
-//-----------------------------------------------------------------------------
-static void cleanup_signals(control_t *control)
-{
-	assert(control);
-	assert(control->sigint_event == NULL);
-	assert(control->sighup_event == NULL);
-}
-
-//-----------------------------------------------------------------------------
-// add the controller details to the rq library so taht it can manage
-// connecting to the controller.
-static void init_controllers(control_t *control)
-{
-	char *str;
-	
-	assert(control);
-	assert(control->settings);
-	assert(control->settings->controllers);
-	assert(control->rq);
-
-	while ((str = ll_pop_head(control->settings->controllers))) {
-		rq_addcontroller(control->rq, str);
-		free(str);
-	}
-}
-
-//-----------------------------------------------------------------------------
-static void cleanup_controllers(control_t *control)
-{
-	assert(control);
-	assert(control->settings);
-	assert(control->settings->controllers);
-	assert(ll_count(control->settings->controllers) == 0);
-}
-
-//-----------------------------------------------------------------------------
-static void init_config(control_t *control)
-{
-	assert(control);
-	assert(control->settings);
-	assert(control->settings->configfile);
-	assert(control->config == NULL);
-
-	control->config = (config_t *) malloc(sizeof(config_t));
-	assert(control->config);
-	config_init(control->config);
-	if (config_load(control->config, control->settings->configfile) < 0) {
-		fprintf(stderr, "Errors loading config file: %s\n", control->settings->configfile);
-		exit(EXIT_FAILURE);
-	}
-}
-
-//-----------------------------------------------------------------------------
-static void cleanup_config(control_t *control)
-{
-	assert(control);
-	assert(control->config);
-	config_free(control->config);
-	free(control->config);
-	control->config = NULL;
-}
-
-//-----------------------------------------------------------------------------
-static void init_bufpool(control_t *control)
-{
-	assert(control);
-	assert(control->bufpool == NULL);
-
-	control->bufpool = (expbuf_pool_t *) malloc(sizeof(expbuf_pool_t));
-	expbuf_pool_init(control->bufpool, 0);
-}
-
-//-----------------------------------------------------------------------------
-static void cleanup_bufpool(control_t *control)
-{
-	assert(control);
-	assert(control->bufpool);
-
-	expbuf_pool_free(control->bufpool);
-	free(control->bufpool);
-	control->bufpool = NULL;
-}
-
-//-----------------------------------------------------------------------------
-// connect to the specific queues that we want to connect to.
-static void init_queues(control_t *control)
-{
-	assert(control);
-	assert(control->settings);
-	assert(control->settings->queue);
-	assert(control->rq);
-	
-	rq_consume(control->rq, control->settings->queue, 200, RQ_PRIORITY_NORMAL, 0, message_handler, control);
-}
-
-static void cleanup_queues(control_t *control)
-{
-	assert(control);
-
-	// not really anything we can do about the queues, they get cleaned up automatically by RQ.
-}
-
-// Initialise the risp system.
-static void init_risp(control_t *control)
-{
-	assert(control);
-	assert(control->risp == NULL);
-
-	control->risp = risp_init();
-	assert(control->risp != NULL);
-	risp_add_invalid(control->risp, cmdInvalid);
-	risp_add_command(control->risp, HCFG_CMD_CLEAR, 	 &cmdClear);
-	risp_add_command(control->risp, HCFG_CMD_EXECUTE,  &cmdExecute);
- 	risp_add_command(control->risp, HCFG_CMD_HOST,     &cmdHost);
-	risp_add_command(control->risp, HCFG_CMD_PATH,     &cmdPath);
-}
-
-// cleanup risp library.
-static void cleanup_risp(control_t *control)
-{
-	assert(control);
-	assert(control->risp);
-
-	risp_shutdown(control->risp);
-	control->risp = NULL;
-}
-
-
-
-
-
-void process_args(settings_t *settings, int argc, char **argv)
-{
-	int c;
-	
-	while (-1 != (c = getopt(argc, argv,
-			"h"   /* help */
-			"v"   /* verbose */
-			"d:"  /* start as daemmon */
-			"u:"  /* username to run as */
-			"P:"  /* pidfile to store pid to */
-			"c:"	/* controller to connect to */
-			"f:"  /* sqlite3 configuration filename */
-			"q:"  /* queue to listen on */
-		))) {
-		switch (c) {
-
-			case 'q':
-				assert(settings->queue == NULL);
-				settings->queue = strdup(optarg);
-				assert(settings->queue);
-				break;
-
-			case 'f':
-				assert(settings->configfile == NULL);
-				settings->configfile = strdup(optarg);
-				assert(settings->configfile);
-				break;
-
-			case 'c':
-				assert(settings->controllers);
-				ll_push_tail(settings->controllers, strdup(optarg));
-				break;
-
-			case 'h':
-				usage();
-				exit(EXIT_SUCCESS);
-				break;
-			case 'v':
-				settings->verbose++;
-				break;
-			case 'd':
-				assert(settings->daemonize == false);
-				settings->daemonize = true;
-				break;
-			case 'u':
-				assert(settings->username == NULL);
-				settings->username = strdup(optarg);
-				assert(settings->username != NULL);
-				break;
-			case 'P':
-				assert(settings->pid_file == NULL);
-				settings->pid_file = strdup(optarg);
-				assert(settings->pid_file != NULL);
-				break;
-				
-			default:
-				fprintf(stderr, "Illegal argument \"%c\"\n", c);
-				exit(EXIT_FAILURE);
-				break;
-		}
-	}
-}
-
 
 
 
@@ -1381,30 +977,87 @@ void process_args(settings_t *settings, int argc, char **argv)
 // sockets and event loop.
 int main(int argc, char **argv) 
 {
+	rq_service_t   *service;
 	control_t      *control  = NULL;
+	char *queue;
 
 ///============================================================================
 /// Initialization.
 ///============================================================================
 
 	control = (control_t *) malloc(sizeof(control_t));
-
 	init_control(control);
-	init_settings(control);
+	// create new service object.
+	service = rq_svc_new();
+	control->rqsvc = service;
 
-	process_args(control->settings, argc, argv);
-
-	check_settings(control);
-	init_daemon(control);
-	init_events(control);
+	// add the command-line options that are specific to this service.
+	rq_svc_setname(service, PACKAGE " " VERSION);
+	rq_svc_setoption(service, 'f', "filename", "Sqlite3 config file.");
+	rq_svc_setoption(service, 'q', "queue",    "Queue to listen on for requests.");
+	rq_svc_process_args(service, argc, argv);
+	rq_svc_initdaemon(service);
 	
-	init_rq(control);
-	init_risp(control);
-	init_signals(control);
-	init_controllers(control);
-	init_config(control);
-	init_bufpool(control);
-	init_queues(control);
+	assert(control->evbase == NULL);
+	control->evbase = event_base_new();
+	assert(control->evbase);
+	rq_svc_setevbase(service, control->evbase);
+
+
+	// initialise the risp system for processing what we receive on the queue.
+	assert(control);
+	assert(control->risp == NULL);
+	control->risp = risp_init();
+	assert(control->risp != NULL);
+	risp_add_invalid(control->risp, cmdInvalid);
+	risp_add_command(control->risp, HCFG_CMD_CLEAR, 	 &cmdClear);
+	risp_add_command(control->risp, HCFG_CMD_EXECUTE,  &cmdExecute);
+ 	risp_add_command(control->risp, HCFG_CMD_HOST,     &cmdHost);
+	risp_add_command(control->risp, HCFG_CMD_PATH,     &cmdPath);
+ 	
+	// initialise signal handlers.
+	assert(control);
+	assert(control->evbase);
+	assert(control->sigint_event == NULL);
+	control->sigint_event = evsignal_new(control->evbase, SIGINT, sigint_handler, control);
+	assert(control->sigint_event);
+	event_add(control->sigint_event, NULL);
+	assert(control->sighup_event == NULL);
+	control->sighup_event = evsignal_new(control->evbase, SIGHUP, sighup_handler, control);
+	assert(control->sighup_event);
+	event_add(control->sighup_event, NULL);
+
+	// load the config file that we assume is supplied.
+	assert(control->configfile == NULL);
+	control->configfile = rq_svc_getoption(service, 'f');
+	if (control->configfile == NULL) {
+		fprintf(stderr, "Configfile is required\n");
+		exit(EXIT_FAILURE);
+	}
+	else {
+		if (config_load(control) < 0) {
+			fprintf(stderr, "Errors loading config file: %s\n", control->configfile);
+			exit(EXIT_FAILURE);
+		}
+	}
+
+	// Tell the rq subsystem to connect to the rq servers.  It gets its info
+	// from the common paramaters that it expects.
+	rq_svc_connect(service, NULL, NULL, NULL);
+	
+	// initialise the queue that we are consuming, provide callback handler.
+	queue = rq_svc_getoption(service, 'q');
+	if (queue == NULL) {
+		fprintf(stderr, "Need to specify a queue.\n");
+		exit(EXIT_FAILURE);
+	}
+	assert(queue);
+	assert(service->rq);
+	rq_consume(service->rq, queue, 200, RQ_PRIORITY_NORMAL, 0, message_handler, NULL, NULL, control);
+
+	// we also want to make sure that when we lose the connection to the
+	// controller, we indicate that we lost connection to the queue, unless we
+	// have already established another controller connection.
 
 ///============================================================================
 /// Main Event Loop.
@@ -1422,21 +1075,38 @@ int main(int argc, char **argv)
 /// Shutdown
 ///============================================================================
 
-	cleanup_events(control);
+	assert(control);
+	assert(control->evbase);
+	event_base_free(control->evbase);
+	control->evbase = NULL;
 
-	cleanup_queues(control);
-	cleanup_bufpool(control);
-	cleanup_config(control);
-	cleanup_controllers(control);
-	cleanup_signals(control);
-	cleanup_risp(control);
-	cleanup_rq(control);
+	// the rq service sub-system has no real way of knowing when the event-base
+	// has been cleared, so we need to tell it.
+	rq_svc_setevbase(service, NULL);
 
-	cleanup_daemon(control);
-	cleanup_settings(control);
+
+	// unload the config entries.
+	config_unload(control);
+	assert(control->aliases == NULL);
+	assert(control->hosts == NULL);
+	
+
+	// make sure signal handlers have been cleared.
+	assert(control);
+	assert(control->sigint_event == NULL);
+	assert(control->sighup_event == NULL);
+
+	// cleanup risp library.
+	assert(control);
+	assert(control->risp);
+	risp_shutdown(control->risp);
+	control->risp = NULL;
+
+	// we are done, cleanup what is left in the control structure.
 	cleanup_control(control);
-
 	free(control);
+
+	rq_svc_cleanup(service);
 
 	return 0;
 }
