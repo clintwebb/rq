@@ -14,8 +14,8 @@
 // services can ensure that the correct version is installed.
 // This version number should be incremented with every change that would
 // effect logic.
-#define LIBRQ_VERSION  0x00010001
-#define LIBRQ_VERSION_NAME "v1.00.01"
+#define LIBRQ_VERSION  0x00010005
+#define LIBRQ_VERSION_NAME "v1.00.05"
 
 
 #if (LIBEVENT_VERSION_NUMBER < 0x02000100)
@@ -29,6 +29,11 @@
 #if (EXPBUF_VERSION < 0x00010200)
 	#error "Needs libexpbuf v1.2.1 or higher"
 #endif
+
+#if (LIBLINKLIST_VERSION < 0x00007000)
+	#error "Needs liblinklist v0.70 or higher"
+#endif
+
 
 /* Get a consistent bool type */
 #if HAVE_STDBOOL_H
@@ -209,16 +214,54 @@ typedef struct {
 } rq_conn_t;
 
 
+typedef struct {
+	char *param;
+	char *details;
+	char *value;
+	int count;
+} rq_svc_helpoption_t;
+
+#define RQ_MAX_HELPOPTIONS 128
+
+typedef struct {
+	char *svcname;
+	rq_t *rq;
+	short verbose;
+	rq_svc_helpoption_t *help_options[RQ_MAX_HELPOPTIONS];
+} rq_service_t;
+
+
+
 void rq_set_maxconns(int maxconns);
 int  rq_new_socket(struct addrinfo *ai);
-int  rq_daemon(char *username, char *pidfile, int noclose);
+void rq_daemon(const char *username, const char *pidfile, const int noclose);
 
 void rq_init(rq_t *rq);
 void rq_shutdown(rq_t *rq);
 void rq_cleanup(rq_t *rq);
 void rq_setevbase(rq_t *rq, struct event_base *base);
-void rq_addcontroller(rq_t *rq, char *host);
-void rq_consume(rq_t *rq, char *queue, int max, int priority, int exclusive, void (*handler)(rq_message_t *msg, void *arg), void *arg);
+
+// add a controller to the list, and it should attempt to connect to one of
+// them.   Callback functions can be provided so that actions can be performed
+// when there are no connections to the controllers.
+void rq_addcontroller(
+	rq_t *rq,
+	char *host,
+	void (*connect_handler)(rq_service_t *service, void *arg),
+	void (*dropped_handler)(rq_service_t *service, void *arg),
+	void *arg);
+
+// start consuming a queue.
+void rq_consume(
+	rq_t *rq,
+	char *queue,
+	int max,
+	int priority,
+	int exclusive,
+	void (*handler)(rq_message_t *msg, void *arg),
+	void (*accepted)(char *queue, queue_id_t qid, void *arg),
+	void (*dropped)(char *queue, queue_id_t qid, void *arg),
+	void *arg);
 
 
 rq_message_t * rq_msg_new(rq_t *rq);
@@ -250,6 +293,36 @@ void rq_send(rq_t *rq, rq_message_t *msg, void (*handler)(rq_message_t *reply, v
 void rq_resend(rq_message_t *msg);
 void rq_reply(rq_message_t *msg);
 
+
+/*---------------------------------------------------------------------------*/
+// Service control.  To make writing services for the RQ environment easier,
+// we handle everything we can.
+
+
+
+// Initialise a new rq_service_t object and return a pointer to it.  It should
+// be cleaned up with rq_service_cleanup()
+rq_service_t *rq_svc_new(void);
+
+// Cleanup the service object and free its resources and itself.
+void rq_svc_cleanup(rq_service_t *service);
+
+void rq_svc_setname(rq_service_t *service, const char *name);
+char * rq_svc_getoption(rq_service_t *service, char tag);
+void   rq_svc_setoption(rq_service_t *service, char tag, const char *param, const char *details);
+
+void rq_svc_process_args(rq_service_t *service, int argc, char **argv);
+
+void rq_svc_shutdown(rq_service_t *service);
+
+void rq_svc_initdaemon(rq_service_t *service);
+void rq_svc_setevbase(rq_service_t *service, struct event_base *evbase);
+
+int rq_svc_connect(
+	rq_service_t *service,
+	void (*connect_handler)(rq_service_t *service, void *arg),
+	void (*dropped_handler)(rq_service_t *service, void *arg),
+	void *arg);
 
 
 #endif

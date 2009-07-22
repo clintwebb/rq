@@ -19,6 +19,12 @@
 #include <unistd.h>
 
 
+#if (LIBRQ_VERSION != 0x00010005)
+	#error "Incorrect rq.h header version."
+#endif
+
+
+
 // pre-declare the handlers otherwise we end up with a precedence loop.
 static void rq_read_handler(int fd, short int flags, void *arg);
 static void rq_write_handler(int fd, short int flags, void *arg);
@@ -63,6 +69,76 @@ void rq_set_maxconns(int maxconns)
 	}
 }
 
+void rq_daemon(const char *username, const char *pidfile, const int noclose)
+{
+	struct passwd *pw;
+	struct sigaction sa;
+	int fd;
+	FILE *fp;
+	
+	if (username != NULL) {
+		assert(username[0] != '\0');
+		if (getuid() == 0 || geteuid() == 0) {
+			if (username == 0 || *username == '\0') {
+				fprintf(stderr, "can't run as root without the -u switch\n");
+				exit(EXIT_FAILURE);
+			}
+			pw = getpwnam((const char *)username);
+			if (pw == NULL) {
+				fprintf(stderr, "can't find the user %s to switch to\n", username);
+				exit(EXIT_FAILURE);
+			}
+			if (setgid(pw->pw_gid) < 0 || setuid(pw->pw_uid) < 0) {
+				fprintf(stderr, "failed to assume identity of user %s\n", username);
+				exit(EXIT_FAILURE);
+			}
+		}
+	}
+
+	sa.sa_handler = SIG_IGN;
+	sa.sa_flags = 0;
+	if (sigemptyset(&sa.sa_mask) == -1 || sigaction(SIGPIPE, &sa, 0) == -1) {
+		perror("failed to ignore SIGPIPE; sigaction");
+		exit(EXIT_FAILURE);
+	}
+
+	switch (fork()) {
+		case -1:
+			exit(EXIT_FAILURE);
+		case 0:
+			break;
+		default:
+			_exit(EXIT_SUCCESS);
+	}
+
+	if (setsid() == -1)
+			exit(EXIT_FAILURE);
+
+	(void)chdir("/");
+
+	if (noclose == 0 && (fd = open("/dev/null", O_RDWR, 0)) != -1) {
+		(void)dup2(fd, STDIN_FILENO);
+		(void)dup2(fd, STDOUT_FILENO);
+		(void)dup2(fd, STDERR_FILENO);
+		if (fd > STDERR_FILENO)
+			(void)close(fd);
+	}
+
+	// save the PID in if we're a daemon, do this after thread_init due to a
+	// file descriptor handling bug somewhere in libevent
+	if (pidfile != NULL) {
+		if ((fp = fopen(pidfile, "w")) == NULL) {
+			fprintf(stderr, "Could not open the pid file %s for writing\n", pidfile);
+			exit(EXIT_FAILURE);
+		}
+
+		fprintf(fp,"%ld\n", (long)getpid());
+		if (fclose(fp) == -1) {
+			fprintf(stderr, "Could not close the pid file %s.\n", pidfile);
+			exit(EXIT_FAILURE);
+		}
+	}
+}
 
 
 //-----------------------------------------------------------------------------
@@ -90,84 +166,6 @@ int rq_new_socket(struct addrinfo *ai) {
 
 
 
-// based on some code that was used in memcached.
-int rq_daemon(char *username, char *pidfile, int noclose)
-{
-	struct passwd *pw;
-	struct sigaction sa;
-	int fd;
-	FILE *fp;
-
-	// if we are supplied with a username, drop privs to it.  This will only 
-	// work if we are running as root, and is really only needed when running as 
-	// a daemon.
-	if (username != NULL) {
-
-		assert(username[0] != '\0');
-  
-		if (getuid() == 0 || geteuid() == 0) {
-			if (username == 0 || *username == '\0') {
-				fprintf(stderr, "can't run as root without the -u switch\n");
-				return 1;
-			}
-			pw = getpwnam((const char *)username);
-			if (pw == NULL) {
-				fprintf(stderr, "can't find the user %s to switch to\n", username);
-				return 1;
-			}
-			if (setgid(pw->pw_gid) < 0 || setuid(pw->pw_uid) < 0) {
-				fprintf(stderr, "failed to assume identity of user %s\n", username);
-				return 1;
-			}
-		}
-	}
-
-	sa.sa_handler = SIG_IGN;
-	sa.sa_flags = 0;
-	if (sigemptyset(&sa.sa_mask) == -1 || sigaction(SIGPIPE, &sa, 0) == -1) {
-		perror("failed to ignore SIGPIPE; sigaction");
-		exit(EXIT_FAILURE);
-	}
-
-	switch (fork()) {
-		case -1:
-			return (-1);
-		case 0:
-			break;
-		default:
-			_exit(EXIT_SUCCESS);
-	}
-
-	if (setsid() == -1)
-			return (-1);
-
-	(void)chdir("/");
-
-	if (noclose == 0 && (fd = open("/dev/null", O_RDWR, 0)) != -1) {
-		(void)dup2(fd, STDIN_FILENO);
-		(void)dup2(fd, STDOUT_FILENO);
-		(void)dup2(fd, STDERR_FILENO);
-		if (fd > STDERR_FILENO)
-			(void)close(fd);
-	}
-
-	// save the PID in if we're a daemon, do this after thread_init due to a 
-	// file descriptor handling bug somewhere in libevent
-	if (pidfile != NULL) {
-		if ((fp = fopen(pidfile, "w")) == NULL) {
-			fprintf(stderr, "Could not open the pid file %s for writing\n", pidfile);
-			return -1;
-		}
-	
-		fprintf(fp,"%ld\n", (long)getpid());
-		if (fclose(fp) == -1) {
-			fprintf(stderr, "Could not close the pid file %s.\n", pidfile);
-			return -1;
-		}
-	}
-    
-	return (0);
-}
 
 
 static void rq_data_init(rq_data_t *data, expbuf_pool_t *pool)
@@ -358,7 +356,7 @@ static void rq_conn_closed(rq_conn_t *conn)
 	assert(conn->rq);
 	assert(ll_count(&conn->rq->connlist) > 0);
 	if (ll_count(&conn->rq->connlist) > 1) {
-		ll_remove(&conn->rq->connlist, conn, NULL);
+		ll_remove(&conn->rq->connlist, conn);
 		ll_push_tail(&conn->rq->connlist, conn);
 	}
 
@@ -492,14 +490,13 @@ static void rq_send_closing(rq_conn_t *conn)
 void rq_shutdown(rq_t *rq)
 {
 	rq_conn_t *conn;
-	void *next;
 	int pending;
 	
 	assert(rq);
 
 	// go thru the connect list, and tell each one that it is shutting down.
-	next = ll_start(&rq->connlist);
-	while ((conn = ll_next(&rq->connlist, &next))) {
+	ll_start(&rq->connlist);
+	while ((conn = ll_next(&rq->connlist))) {
 
 		// Because the list entries may move around while being processed, we may
 		// need to restart the list from the head again.  Therefore we need to
@@ -523,7 +520,8 @@ void rq_shutdown(rq_t *rq)
 					// list, so we need to reset the 'next'.  This means the loop will
 					// restart again, but we wont process the ones that we have already
 					// marked as 'shutdown'
-					next = ll_start(&rq->connlist);
+					ll_finish(&rq->connlist);
+					ll_start(&rq->connlist);
 				}
 				else {
 					assert(conn->active > 0);
@@ -557,13 +555,14 @@ void rq_shutdown(rq_t *rq)
 						// list, so we need to reset the 'next'.  This means the loop will
 						// restart again, but we wont process the ones that we have already
 						// marked as 'shutdown'
-						next = ll_start(&rq->connlist);
-						
+						ll_finish(&rq->connlist);
+						ll_start(&rq->connlist);
 					}
 				}
 			}
 		}
 	}
+	ll_finish(&rq->connlist);
 }
 
 
@@ -626,17 +625,21 @@ void rq_cleanup(rq_t *rq)
 	expbuf_pool_free(rq->bufpool);
 	free(rq->bufpool);
 	rq->bufpool = NULL;
-
 }
 
 
 void rq_setevbase(rq_t *rq, struct event_base *base)
 {
 	assert(rq);
-	assert(base);
 
-	assert(rq->evbase == NULL);
-	rq->evbase = base;
+	if (base) {
+		assert(rq->evbase == NULL);
+		rq->evbase = base;
+	}
+	else {
+		assert(rq->evbase);
+		rq->evbase = NULL;
+	}
 }
 
 
@@ -814,7 +817,6 @@ static void rq_connect_handler(int fd, short int flags, void *arg)
 {
 	rq_conn_t *conn = (rq_conn_t *) arg;
 	rq_queue_t *q;
-	void *next;
 	socklen_t foo;
 	int error;
 
@@ -888,10 +890,11 @@ static void rq_connect_handler(int fd, short int flags, void *arg)
 		}
 		
 		// now that we have an active connection, we need to send our queue requests.
-		next = ll_start(&conn->rq->queues);
-		while ((q = ll_next(&conn->rq->queues, &next))) {
+		ll_start(&conn->rq->queues);
+		while ((q = ll_next(&conn->rq->queues))) {
 			rq_send_consume(conn, q);
 		}
+		ll_finish(&conn->rq->queues);
 	
 		// just in case there is some data there already.
 		rq_process_read(conn);
@@ -922,13 +925,25 @@ static void rq_read_handler(int fd, short int flags, void *arg)
 // add a controller to the end of the connection list.   If this is the first
 // controller, then we need to attempt to connect to it, and setup the socket
 // on the event queue.
-void rq_addcontroller(rq_t *rq, char *host)
+void rq_addcontroller(
+	rq_t *rq,
+	char *host,
+	void (*connect_handler)(rq_service_t *service, void *arg),
+	void (*dropped_handler)(rq_service_t *service, void *arg),
+	void *arg)
 {
 	rq_conn_t *conn;
 	
 	assert(rq != NULL);
 	assert(host != NULL);
 	assert(host[0] != '\0');
+	assert((arg != NULL && (connect_handler || dropped_handler)) || (arg == NULL));
+
+	// dont currently have it coded to handle these, so we will fail for now
+	// until we find a need to use them.
+	assert(connect_handler == NULL);
+	assert(dropped_handler == NULL);
+	assert(arg == NULL);
 
 	fprintf(stderr, "rq: addcontroller(\"%s\")\n", host);
 
@@ -981,36 +996,45 @@ void rq_addcontroller(rq_t *rq, char *host)
 // already connected to a controller, then the queue request will be sent
 // straight away.  If not, then the request will be made as soon as a
 // connection is made.  
-void rq_consume(rq_t *rq, char *queue, int max, int priority, int exclusive, void (*handler)(rq_message_t *msg, void *arg), void *arg)
+void rq_consume(
+	rq_t *rq,
+	char *queue,
+	int max,
+	int priority,
+	int exclusive,
+	void (*handler)(rq_message_t *msg, void *arg),
+	void (*accepted)(char *queue, queue_id_t qid, void *arg),
+	void (*dropped)(char *queue, queue_id_t qid, void *arg),
+	void *arg)
 {
 	int found;
 	rq_queue_t *q;
 	rq_conn_t *conn;
-	void *next;
 	
-	assert(rq != NULL);
-	assert(queue != NULL);
+	assert(rq);
+	assert(queue);
 	assert(strlen(queue) < 256);
 	assert(max >= 0);
 	assert(priority == RQ_PRIORITY_NONE || priority == RQ_PRIORITY_LOW || priority == RQ_PRIORITY_NORMAL || priority == RQ_PRIORITY_HIGH);
-	assert(handler != NULL);
+	assert(handler);
 
 	// check that we are connected to a controller.
 	assert(ll_count(&rq->connlist) > 0);
 
 	// check that we are not already consuming this queue.
 	found = 0;
-	next = ll_start(&rq->queues);
-	q = ll_next(&rq->queues, &next);
+	ll_start(&rq->queues);
+	q = ll_next(&rq->queues);
 	while (q && found == 0) {
 		if (strcmp(q->queue, queue) == 0) {
 			// the queue is already in our list...
 			found ++;
 		}
 		else {
-			q = ll_next(&rq->queues, &next);
+			q = ll_next(&rq->queues);
 		}
 	}
+	ll_finish(&rq->queues);
 
 	if (found == 0) {
 		q = (rq_queue_t *) malloc(sizeof(rq_queue_t));
@@ -1043,7 +1067,6 @@ static void processRequest(rq_conn_t *conn)
 	queue_id_t qid = 0;
 	char *qname = NULL;
 	rq_queue_t *tmp, *queue;
-	void *next;
 	rq_message_t *msg;
 	expbuf_t *buf;
 	
@@ -1073,8 +1096,8 @@ static void processRequest(rq_conn_t *conn)
 		// find the queue to handle this request.
 		// TODO: use a function call to do this.
 		queue = NULL;
-		next = ll_start(&conn->rq->queues);
-		tmp = ll_next(&conn->rq->queues, &next);
+		ll_start(&conn->rq->queues);
+		tmp = ll_next(&conn->rq->queues);
 		while (tmp) {
 			assert(tmp->qid > 0);
 			assert(tmp->queue);
@@ -1083,9 +1106,10 @@ static void processRequest(rq_conn_t *conn)
 				tmp = NULL;
 			}
 			else {
-				tmp = ll_next(&conn->rq->queues, &next);
+				tmp = ll_next(&conn->rq->queues);
 			}
 		}
+		ll_finish(&conn->rq->queues);
 
 		if (queue == NULL) {
 			// we dont seem to be consuming that queue...
@@ -1201,15 +1225,14 @@ static void processReceived(rq_conn_t *conn)
 static void storeQueueID(rq_conn_t *conn, char *queue, int qid)
 {
 	rq_queue_t *q;
-	void *next;
 
 	assert(conn);
 	assert(queue);
 	assert(qid > 0);
 	assert(ll_count(&conn->rq->queues) > 0);
 
-	next = ll_start(&conn->rq->queues);
-	q = ll_next(&conn->rq->queues, &next);
+	ll_start(&conn->rq->queues);
+	q = ll_next(&conn->rq->queues);
 	while (q) {
 		if (strcmp(q->queue, queue) == 0) {
 			assert(q->qid == 0);
@@ -1217,9 +1240,10 @@ static void storeQueueID(rq_conn_t *conn, char *queue, int qid)
 			q = NULL;
 		}
 		else {
-			q = ll_next(&conn->rq->queues, &next);
+			q = ll_next(&conn->rq->queues);
 		}
 	}
+	ll_finish(&conn->rq->queues);
 }
 
 
@@ -1753,5 +1777,318 @@ void rq_reply(rq_message_t *msg)
 }
 
 
+///----------------------------------------------------------------------------
+/// Service management.
+///----------------------------------------------------------------------------
 
 
+//-----------------------------------------------------------------------------
+// Initialise a new rq_service_t object and return a pointer to it.  It should be cleaned up with rq_service_cleanup()
+rq_service_t *rq_svc_new(void)
+{
+	rq_service_t *service;
+	int i;
+
+	service = (rq_service_t *) malloc(sizeof(rq_service_t));
+	
+	service->verbose = false;
+
+	service->rq = (rq_t *) malloc(sizeof(rq_t));
+	rq_init(service->rq);
+	assert(service->rq->evbase == NULL);
+
+	for (i=0; i<RQ_MAX_HELPOPTIONS; i++) {
+		service->help_options[i] = NULL;
+	}
+
+	service->svcname = NULL;
+	rq_svc_setoption(service, 'c', "ip:port",  "Controller to connect to.");
+	rq_svc_setoption(service, 'd', NULL,       "Run as a daemon");
+	rq_svc_setoption(service, 'P', "file",     "save PID in <file>, only used with -d option");
+	rq_svc_setoption(service, 'u', "username", "assume identity of <username> (only when run as root)");
+	rq_svc_setoption(service, 'v', NULL,       "verbose (print errors/warnings to stdout)");
+	rq_svc_setoption(service, 'h', NULL,       "print this help and exit");
+
+	return(service);
+}
+
+//-----------------------------------------------------------------------------
+// Cleanup the service object and free its resources and itself.
+void rq_svc_cleanup(rq_service_t *service)
+{
+	rq_svc_helpoption_t *help;
+	int i;
+	
+	assert(service);
+	
+	assert(service->rq);
+	rq_cleanup(service->rq);
+	free(service->rq);
+	service->rq = NULL;
+
+	// if we are in daemon mode, and a pidfile is provided, then we need to delete the pidfile
+	assert(service->help_options['d']);
+	assert(service->help_options['P']);
+	if (service->help_options['d']->count && service->help_options['P']->value) {
+		assert(service->help_options['P']->value[0] != 0);
+		unlink(service->help_options['P']->value);
+	}
+
+	// free all the memory used by the help-options, command-line values.
+	for (i=0; i<RQ_MAX_HELPOPTIONS; i++) {
+		if (service->help_options[i]) {
+			help = service->help_options[i];
+			if (help->value)   free(help->value);
+			free(help);
+		}
+	}
+
+	assert(service);
+	service->svcname = NULL;
+
+	free(service);
+}
+
+
+void rq_svc_setname(rq_service_t *service, const char *name)
+{
+	assert(service);
+	assert(name);
+
+	assert(service->svcname == NULL);
+	service->svcname = name;
+}
+
+
+// add a help option to the list.
+void rq_svc_setoption(rq_service_t *service, char tag, const char *param, const char *details)
+{
+	rq_svc_helpoption_t *help;
+
+	assert(service);
+	assert(details);
+	assert(tag > 0 && tag < RQ_MAX_HELPOPTIONS);
+	assert(service->help_options[(int)tag] == NULL);
+		
+	help = (rq_svc_helpoption_t *) malloc(sizeof(rq_svc_helpoption_t));
+	help->param = (char *) param;
+	help->details = (char *) details;
+	help->value = NULL;
+	help->count = 0;
+
+	service->help_options[(int)tag] = help;
+}
+
+
+static void rq_svc_usage(rq_service_t *service)
+{
+	int i;
+	int largest;
+	int len;
+	rq_svc_helpoption_t *entry;
+	
+	assert(service);
+
+	// go through the options list and determine the largest param field.
+	largest = 0;
+	for (i=0; i<RQ_MAX_HELPOPTIONS; i++) {
+		entry = service->help_options[i];
+		if (entry) {
+			if (entry->param) {
+				len = strlen(entry->param);
+				if (len > largest) { largest = len; }
+			}
+		}
+	}
+
+	// if we have any options with parameters, then we need to account for the <> that we will be putting around them.
+	if (largest > 0) {
+		largest += 2;
+	}
+
+	// now go through the list and display the info.
+	printf("Usage:\n");
+	for (i=0; i<RQ_MAX_HELPOPTIONS; i++) {
+		entry = service->help_options[i];
+		if (entry) {
+			assert(entry->details);
+			if (largest == 0) {
+				printf(" -%c %s\n", i, entry->details);
+			}
+			else {
+
+			/// TODO: Need to use the 'largest' to space out the detail from the param.
+			
+				if (entry->param) {
+					printf(" -%c <%s> %s\n", i, entry->param, entry->details);
+				}
+				else {
+					printf(" -%c %s %s\n", i, "", entry->details);
+				}
+			}
+		}
+	}
+}
+
+
+#define MAX_OPTSTR ((RQ_MAX_HELPOPTIONS) * 4)
+void rq_svc_process_args(rq_service_t *service, int argc, char **argv)
+{
+	int c;
+	rq_svc_helpoption_t *entry;
+	int i;
+	char optstr[MAX_OPTSTR + 1];
+	int len;
+
+	assert(service);
+	assert(argc > 0);
+	assert(argv);
+
+	// build the getopt string.
+	len = 0;
+	for (i=0; i<RQ_MAX_HELPOPTIONS; i++) {
+		entry = service->help_options[i];
+		if (entry) {
+			assert(entry->value == NULL);
+			optstr[len++] = i;
+			if (entry->param != NULL) {
+				optstr[len++] = ':';
+			}
+		}
+		assert(len < MAX_OPTSTR);
+	}
+	optstr[len++] = '\0';
+	
+	while (-1 != (c = getopt(argc, argv, optstr))) {
+		if ((entry = service->help_options[c])) {
+			if (entry->param) {
+				assert(entry->count == 0);
+				assert(entry->value == NULL);
+				entry->value = strdup(optarg);
+			}
+			else {
+				entry->count ++;
+			}
+		}
+		else {
+			fprintf(stderr, "Illegal argument \"%c\"\n", c);
+			exit(EXIT_FAILURE);
+		}
+	}
+
+	// check for -h, display help
+	assert(service->help_options['h']);
+	if (service->help_options['h']->count > 0) {
+		rq_svc_usage(service);
+		exit(EXIT_SUCCESS);
+	}
+
+	// check for -v, for verbosity.
+	assert(service->help_options['v']);
+	service->verbose = service->help_options['v']->count;
+	assert(service->verbose >= 0);
+}
+#undef MAX_OPTSTR
+
+
+// Function is used to initialise a shutdown of the rq service.
+void rq_svc_shutdown(rq_service_t *service)
+{
+	assert(service);
+
+	assert(service->rq);
+	rq_shutdown(service->rq);
+}
+
+//-----------------------------------------------------------------------------
+// This function is used to initialise the service using the parameters that
+// were supplied and already processed.   Therefore rq_svc_process_args()
+// should be run before this function.  If the options state to be in daemon
+// mode, it will fork and set the username it is running;
+void rq_svc_initdaemon(rq_service_t *service)
+{
+	char *username;
+	char *pidfile;
+	int noclose;
+	
+	assert(service);
+	assert(service->help_options['d']);
+
+	if (service->help_options['d']->count > 0) {
+
+		assert(service->help_options['u']);
+		assert(service->help_options['P']);
+		username = service->help_options['u']->value;
+		pidfile = service->help_options['P']->value;
+		noclose = service->verbose;
+	
+		// if we are supplied with a username, drop privs to it.  This will only
+		// work if we are running as root, and is really only needed when running as 
+		// a daemon.
+		rq_daemon((const char *)username, (const char *)pidfile, noclose);
+	}
+}
+
+
+void rq_svc_setevbase(rq_service_t *service, struct event_base *evbase)
+{
+	assert(service);
+	assert(service->rq);
+
+	rq_setevbase(service->rq, evbase);
+}
+
+//-----------------------------------------------------------------------------
+// return the value of the stored option value.
+char * rq_svc_getoption(rq_service_t *service, char tag)
+{
+	assert(service);
+	assert(service->help_options[(int)tag]);
+	return(service->help_options[(int)tag]->value);
+}
+
+//-----------------------------------------------------------------------------
+// connect to the controllers that were specified in the controller parameter.
+int rq_svc_connect(
+	rq_service_t *service,
+	void (*connect_handler)(rq_service_t *service, void *arg),
+	void (*dropped_handler)(rq_service_t *service, void *arg),
+	void *arg)
+{
+	char *str;
+	char *copy;
+	char *argument;
+	char *next;
+	
+	assert(service);
+	assert((arg != NULL && (connect_handler || dropped_handler)) || (arg == NULL));
+	assert(service->rq);
+
+	str = rq_svc_getoption(service, 'c');
+	if (str == NULL) {
+		return -1;
+	}	
+
+	// make a copy of the supplied string, because we will be splitting it into
+	// its key/value pairs. We dont want to mangle the string that was supplied.
+	assert(str);
+	copy = strdup(str);
+	assert(copy);
+
+	next = copy;
+	while (next != NULL && *next != '\0') {
+		argument = strsep(&next, ",");
+		if (argument) {
+		
+			// remove spaces from the begining of the key.
+			while(*argument==' ' && *argument!='\0') { argument++; }
+			
+			if (strlen(argument) > 0) {
+				rq_addcontroller(service->rq, argument, connect_handler, dropped_handler, arg);
+			}
+		}
+	}
+	
+	free(copy);
+	return 0;
+}
