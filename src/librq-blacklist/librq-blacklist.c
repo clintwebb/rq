@@ -122,7 +122,6 @@ rq_blacklist_id_t rq_blacklist_check
 	struct sockaddr_in *sin;
 	ev_uint32_t ip;
 	cache_entry_t *entry;
-	void *next;
 	struct timeval tv;
 	time_t curtime;
 	rq_message_t *msg;
@@ -145,29 +144,31 @@ rq_blacklist_id_t rq_blacklist_check
 
 	// check the cache for the address.
 	assert(blacklist->cache);
-	next = ll_start(blacklist->cache);
-	entry = ll_next(blacklist->cache, &next);
+	ll_start(blacklist->cache);
+	entry = ll_next(blacklist->cache);
 	while (entry) {
 		if (entry->ip == ip) {
 			// check to see if entry has expired.
 			assert(entry->expires > 0);
 			if (entry->expires <= curtime) {
 				// cached entry has expired, so we need to remove it from the list.
-				ll_remove(blacklist->cache, entry, next);
+				ll_remove(blacklist->cache, entry);
 				free(entry);
 			}
 			else {
 				// entry is in the list, so we call the handler, and then we return 0.
 				handler(entry->status, arg);
-				return (0);
+				ll_finish(blacklist->cache);
+				return(0);
 			}
 			entry = NULL;
 		}
 		else {
-			entry = ll_next(blacklist->cache, &next);
+			entry = ll_next(blacklist->cache);
 		}
 	}
-
+	ll_finish(blacklist->cache);
+	
 	// if we got this far, then the entry was not found in the cache, so we need
 	// to send a request to the queue.
 

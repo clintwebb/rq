@@ -8,8 +8,8 @@
 #include <risp.h>
 #include <rq.h>
 
-#if (LIBLINKLIST_VERSION < 0x00006000)
-	#error "liblinklist needs to be version v0.6 or higher"
+#if (LIBLINKLIST_VERSION < 0x00007000)
+	#error "liblinklist needs to be version v0.70 or higher"
 #endif
 
 
