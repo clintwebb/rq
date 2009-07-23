@@ -14,8 +14,8 @@
 // services can ensure that the correct version is installed.
 // This version number should be incremented with every change that would
 // effect logic.
-#define LIBRQ_VERSION  0x00010005
-#define LIBRQ_VERSION_NAME "v1.00.05"
+#define LIBRQ_VERSION  0x00010500
+#define LIBRQ_VERSION_NAME "v1.05.00"
 
 
 #if (LIBEVENT_VERSION_NUMBER < 0x02000100)
@@ -80,27 +80,26 @@
 
 
 
-/// null param (0 to 63)
+/// execute commands (0 to 31)
 #define RQ_CMD_NOP              0
 #define RQ_CMD_CLEAR            1
-#define RQ_CMD_EXECUTE          2
+// #define RQ_CMD_EXECUTE          2
 #define RQ_CMD_PING             5
 #define RQ_CMD_PONG             6
-
 #define RQ_CMD_REQUEST          10
 #define RQ_CMD_REPLY            11
 #define RQ_CMD_RECEIVED         12
 #define RQ_CMD_DELIVERED        13
 #define RQ_CMD_BROADCAST        14
-#define RQ_CMD_NOREPLY          15
 #define RQ_CMD_UNDELIVERED      16
-
 #define RQ_CMD_CONSUME          20
 #define RQ_CMD_CANCEL_QUEUE     21
 #define RQ_CMD_CLOSING          22
 #define RQ_CMD_SERVER_FULL      23
 
-#define RQ_CMD_EXCLUSIVE        31
+/// flags (32 to 63)
+#define RQ_CMD_EXCLUSIVE        32
+#define RQ_CMD_NOREPLY          33
 
 /// byte integer (64 to 95)
 #define RQ_CMD_PRIORITY         64

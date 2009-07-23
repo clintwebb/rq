@@ -19,7 +19,7 @@
 #include <unistd.h>
 
 
-#if (LIBRQ_VERSION != 0x00010005)
+#if (LIBRQ_VERSION != 0x00010500)
 	#error "Incorrect rq.h header version."
 #endif
 
@@ -458,28 +458,15 @@ err:
 
 //-----------------------------------------------------------------------------
 // Send a message to the controller that basically states that this client is
-// closing its connection.
+// closing its connection.  Since we are sending a single command we dont need
+// to go through the expence of gettng a buffer from the bufpool.
 static void rq_send_closing(rq_conn_t *conn)
 {
-	expbuf_t *buf;
+	char buf[1];
 	
+	buf[0] = RQ_CMD_CLOSING;
 	assert(conn);
-
-	// get a buffer from the bufpool.
-	assert(conn->rq);
-	assert(conn->rq->bufpool);
-	buf = expbuf_pool_new(conn->rq->bufpool, 3);
-
-	// send consume request to controller.
-	addCmd(buf, RQ_CMD_CLEAR);
-	addCmd(buf, RQ_CMD_CLOSING);
-	addCmd(buf, RQ_CMD_EXECUTE);
-
-	rq_senddata(conn, BUF_DATA(buf), BUF_LENGTH(buf));
-	expbuf_clear(buf);
-	
-	// return the buffer to the bufpool.
-	expbuf_pool_return(conn->rq->bufpool, buf);
+	rq_senddata(conn, buf, 1);
 }
 
 
@@ -797,13 +784,12 @@ static void rq_send_consume(rq_conn_t *conn, rq_queue_t *queue)
 
 	// send consume request to controller.
 	addCmd(buf, RQ_CMD_CLEAR);
-	addCmd(buf, RQ_CMD_CONSUME);
 	if (queue->exclusive != 0)
 		addCmd(buf, RQ_CMD_EXCLUSIVE);
 	addCmdShortStr(buf, RQ_CMD_QUEUE, strlen(queue->queue), queue->queue);
 	addCmdInt(buf, RQ_CMD_MAX, queue->max);
 	addCmdShortInt(buf, RQ_CMD_PRIORITY, queue->priority);
-	addCmd(buf, RQ_CMD_EXECUTE);
+	addCmd(buf, RQ_CMD_CONSUME);
 
 	rq_senddata(conn, BUF_DATA(buf), BUF_LENGTH(buf));
 	expbuf_clear(buf);
@@ -1118,9 +1104,8 @@ static void processRequest(rq_conn_t *conn)
 			buf = expbuf_pool_new(conn->rq->bufpool, 8);
 			assert(buf);
 			addCmd(buf, RQ_CMD_CLEAR);
-			addCmd(buf, RQ_CMD_UNDELIVERED);
 			addCmdLargeInt(buf, RQ_CMD_ID, (short int)msgid);
-			addCmd(buf, RQ_CMD_EXECUTE);
+			addCmd(buf, RQ_CMD_UNDELIVERED);
 			rq_senddata(conn, BUF_DATA(buf), BUF_LENGTH(buf));
 			expbuf_clear(buf);
 			expbuf_pool_return(conn->rq->bufpool, buf);
@@ -1132,9 +1117,8 @@ static void processRequest(rq_conn_t *conn)
 			buf = expbuf_pool_new(conn->rq->bufpool, 8);
 			assert(buf);
 			addCmd(buf, RQ_CMD_CLEAR);
-			addCmd(buf, RQ_CMD_DELIVERED);
 			addCmdLargeInt(buf, RQ_CMD_ID, (short int)msgid);
-			addCmd(buf, RQ_CMD_EXECUTE);
+			addCmd(buf, RQ_CMD_DELIVERED);
 			rq_senddata(conn, BUF_DATA(buf), BUF_LENGTH(buf));
 			expbuf_clear(buf);
 			expbuf_pool_return(conn->rq->bufpool, buf);
@@ -1636,7 +1620,7 @@ void rq_init(rq_t *rq)
 	rq->risp = risp_init();
 	risp_add_invalid(rq->risp, &cmdInvalid);
 	risp_add_command(rq->risp, RQ_CMD_CLEAR,        &cmdClear);
-	risp_add_command(rq->risp, RQ_CMD_EXECUTE,      &cmdExecute);
+// 	risp_add_command(rq->risp, RQ_CMD_EXECUTE,      &cmdExecute);
 	risp_add_command(rq->risp, RQ_CMD_PING,         &cmdPing);
 	risp_add_command(rq->risp, RQ_CMD_PONG,         &cmdPong);
 	risp_add_command(rq->risp, RQ_CMD_REQUEST,      &cmdRequest);
@@ -1856,7 +1840,7 @@ void rq_svc_setname(rq_service_t *service, const char *name)
 	assert(name);
 
 	assert(service->svcname == NULL);
-	service->svcname = name;
+	service->svcname = (char *) name;
 }
 
 
