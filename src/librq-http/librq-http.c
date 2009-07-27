@@ -10,22 +10,13 @@
 #include "rq-http.h"
 
 
-#if (RQ_HTTP_VERSION != 0x00010000)
+#if (RQ_HTTP_VERSION != 0x00000100)
 #error "Compiling against incorrect version of rq-http.h"
 #endif
 
 
-// #include <arpa/inet.h>
+
 #include <assert.h>
-// #include <errno.h>
-// #include <fcntl.h>
-// #include <rispbuf.h>
-// #include <stdio.h>
-// #include <stdlib.h>
-// #include <string.h>
-// #include <sys/socket.h>
-// #include <time.h>
-// #include <unistd.h>
 
 
 void rq_http_init(rq_http_t *http)

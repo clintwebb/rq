@@ -30,7 +30,6 @@ void sigint_handler(evutil_socket_t fd, short what, void *arg)
 	stats_t *stats;
 	queue_t *q;
 	node_t *node;
-	void *next;
 	controller_t *ct;
 	
 	logger(sysdata->logging, 3, "SIGINT");
@@ -68,33 +67,36 @@ void sigint_handler(evutil_socket_t fd, short what, void *arg)
 	// All active nodes should be informed that we are shutting down.
 	logger(sysdata->logging, 2, "Shutting down nodes.");
 	assert(sysdata->nodelist);
-	next = ll_start(sysdata->nodelist);
-	while ((node = ll_next(sysdata->nodelist, &next))) {
+	ll_start(sysdata->nodelist);
+	while ((node = ll_next(sysdata->nodelist))) {
 		assert(node->handle > 0);
 		logger(sysdata->logging, 2, "Initiating shutdown of node %d.", node->handle);
 		node_shutdown(node);
 	}
+	ll_finish(sysdata->nodelist);
 
 	// Now attempt to shutdown all the queues.  Basically, this just means that the queue will close down all the 'waiting' consumers.
 	logger(sysdata->logging, 2, "Initiating shutdown of queues.");
-	next = ll_start(sysdata->queues);
-	while ((q = ll_next(sysdata->queues, &next))) {
+	ll_start(sysdata->queues);
+	while ((q = ll_next(sysdata->queues))) {
 		assert(q->name != NULL);
 		assert(q->qid > 0);
 		logger(sysdata->logging, 2, "Initiating shutdown of queue %d ('%s').", q->qid, q->name);
 		queue_shutdown(q);
 	}
+	ll_finish(sysdata->queues);
 
 	// if we have controllers that are attempting to connect, we need to change their status so that they dont.
 	logger(sysdata->logging, 2, "Stopping controllers that are connecting.");
-	next = ll_start(sysdata->controllers);
-	while ((ct = ll_next(sysdata->controllers, &next))) {
+	ll_start(sysdata->controllers);
+	while ((ct = ll_next(sysdata->controllers))) {
 		BIT_SET(ct->flags, FLAG_CONTROLLER_FAILED);
 		if (ct->connect_event) {
 			event_free(ct->connect_event);
 			ct->connect_event = NULL;
 		}
 	}
+	ll_finish(sysdata->controllers);
 
 	// Put stats event on notice that we are shutting down, so that as soon as there are no more nodes, it needs to stop its event.
 	assert(sysdata != NULL);
@@ -114,7 +116,6 @@ void sighup_handler(evutil_socket_t fd, short what, void *arg)
 	system_data_t *sysdata = (system_data_t *) arg;
 	expbuf_t *buf;
 	queue_t *q;
-	void *next;
 	
 	assert(sysdata);
 	assert(sysdata->bufpool);
@@ -146,13 +147,13 @@ void sighup_handler(evutil_socket_t fd, short what, void *arg)
 
 	expbuf_print(buf, "\nQueues:\n");
 	assert(sysdata->queues);
-	next = ll_start(sysdata->queues);
-	while ((q = ll_next(sysdata->queues, &next))) {
+	ll_start(sysdata->queues);
+	while ((q = ll_next(sysdata->queues))) {
 		queue_dump(q, buf);
 	}
-	
- 
- 
+	ll_finish(sysdata->queues);
+
+
 	assert(sysdata->logging);
 	expbuf_print(buf, "\nLogging:\n");
 	expbuf_print(buf, "\tLog Level: %d\n", log_getlevel(sysdata->logging));

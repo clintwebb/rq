@@ -16,16 +16,16 @@
 #define DATA_MASK_PAYLOAD   64
 
 // operational flags.
-#define DATA_FLAG_REQUEST       1
-#define DATA_FLAG_REPLY         2
-#define DATA_FLAG_BROADCAST     4
+// #define DATA_FLAG_REQUEST       1
+// #define DATA_FLAG_REPLY         2
+// #define DATA_FLAG_BROADCAST     4
 #define DATA_FLAG_NOREPLY       8
-#define DATA_FLAG_CONSUME       16
-#define DATA_FLAG_CANCEL_QUEUE  32
-#define DATA_FLAG_CLOSING       64
-#define DATA_FLAG_SERVER_FULL   128
-#define DATA_FLAG_RECEIVED      512
-#define DATA_FLAG_DELIVERED     1024
+// #define DATA_FLAG_CONSUME       16
+// #define DATA_FLAG_CANCEL_QUEUE  32
+// #define DATA_FLAG_CLOSING       64
+// #define DATA_FLAG_SERVER_FULL   128
+// #define DATA_FLAG_RECEIVED      512
+// #define DATA_FLAG_DELIVERED     1024
 #define DATA_FLAG_EXCLUSIVE     2048
 
 

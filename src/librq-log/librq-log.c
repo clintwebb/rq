@@ -14,18 +14,12 @@
 
 
 #include "rq-log.h"
-
-// #include <arpa/inet.h>
 #include <assert.h>
-// #include <errno.h>
-// #include <fcntl.h>
-// #include <rispbuf.h>
-// #include <stdio.h>
-// #include <stdlib.h>
-// #include <string.h>
-// #include <sys/socket.h>
-// #include <time.h>
-// #include <unistd.h>
+
+
+#if (RQ_LOG_VERSION != 0x00001000)
+	#error "This version designed only for v0.10.00 of librq-log"
+#endif
 
 
 void rq_log_init(rq_log_t *log)
@@ -65,6 +59,7 @@ void rq_log_setqueue(rq_log_t *log, const char *queue)
 static void rq_log_send(rq_log_t *log, unsigned short level, char *data, int length)
 {
 	rq_message_t *msg;
+	rq_conn_t *conn;
 	
 	assert(log && data);
 	assert(length > 0 && length < 0xffff);
@@ -73,14 +68,14 @@ static void rq_log_send(rq_log_t *log, unsigned short level, char *data, int len
 	assert(log->queue);
 	assert(log->rq);
 
-	msg = rq_msg_new(log->rq);
+	msg = rq_msg_new(log->rq, NULL);
 	assert(msg);
 	rq_msg_setqueue(msg, log->queue);
 	
-	rq_msg_addcmd(msg, LOG_CMD_CLEAR);
+	rq_msg_addcmd(msg,          LOG_CMD_CLEAR);
 	rq_msg_addcmd_shortint(msg, LOG_CMD_LEVEL, level);
-	rq_msg_addcmd_str(msg, LOG_CMD_TEXT, length, data);
-	rq_msg_addcmd(msg, LOG_CMD_EXECUTE);
+	rq_msg_addcmd_str(msg,      LOG_CMD_TEXT, length, data);
+	rq_msg_addcmd(msg,          LOG_CMD_EXECUTE);
 
 	// message has been prepared, so send it.
 	rq_send(log->rq, msg, NULL, NULL);
@@ -90,7 +85,6 @@ static void rq_log_send(rq_log_t *log, unsigned short level, char *data, int len
 	msg = NULL;
 }
 
-#define DEFAULT_TRIM_SIZE		1024
 
 
 //-----------------------------------------------------------------------------

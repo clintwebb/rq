@@ -5,17 +5,19 @@
 #include <expbuf.h>
 
 
-#define RQ_HTTP_VERSION	0x00010000
-#define RQ_HTTP_VERSION_NAME "1.00.00
+#define RQ_HTTP_VERSION	0x00000100
+#define RQ_HTTP_VERSION_NAME "0.01.00
 
 
-// null param (0 to 63)
+// command paramaters (0 to 31)
 #define HTTP_CMD_NOP              0
 #define HTTP_CMD_CLEAR            1
 #define HTTP_CMD_EXECUTE          2
-#define HTTP_CMD_METHOD_GET       10
-#define HTTP_CMD_METHOD_POST      11
-#define HTTP_CMD_METHOD_HEAD      12
+
+// flag parameters (32 to 63)
+#define HTTP_CMD_METHOD_GET       32
+#define HTTP_CMD_METHOD_POST      33
+#define HTTP_CMD_METHOD_HEAD      34
 // byte integer (64 to 95)
 // short integer (96 to 127)
 // large integer (128 to 159) 

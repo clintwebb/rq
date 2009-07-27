@@ -68,13 +68,12 @@ queue_t * queue_get_id(list_t *queues, queue_id_t qid)
 {
 	queue_t *q = NULL;
 	queue_t *tmp;
-	void *next;
 
 	assert(queues);
 	assert(qid > 0);
 
-	next = ll_start(queues);
-	tmp = ll_next(queues, &next);
+	ll_start(queues);
+	tmp = ll_next(queues);
 	while (tmp) {
 		assert(tmp->name != NULL);
 		assert(tmp->qid > 0);
@@ -84,9 +83,10 @@ queue_t * queue_get_id(list_t *queues, queue_id_t qid)
 			tmp = NULL;
 		}
 		else {
-			tmp = ll_next(queues, &next);
+			tmp = ll_next(queues);
 		}
 	}
+	ll_finish(queues);
 	
 	return(q);
 }
@@ -97,13 +97,12 @@ queue_t * queue_get_name(list_t *queues, const char *qname)
 {
 	queue_t *q = NULL;
 	queue_t *tmp;
-	void *next;
 
 	assert(queues);
 	assert(qname);
 
-	next = ll_start(queues);
-	tmp = ll_next(queues, &next);
+	ll_start(queues);
+	tmp = ll_next(queues);
 	while (tmp) {
 		assert(tmp->name);
 		assert(tmp->qid > 0);
@@ -113,9 +112,10 @@ queue_t * queue_get_name(list_t *queues, const char *qname)
 			tmp = NULL;
 		}
 		else {
-			tmp = ll_next(queues, &next);
+			tmp = ll_next(queues);
 		}
 	}
+	ll_finish(queues);
 	
 	return(q);
 }
@@ -159,13 +159,12 @@ int queue_check_node(queue_t *queue, node_t *node)
 	int found = 0;
 	node_queue_t *nq;
 	node_t *tmp;
-	void *next;
 
 	assert(queue);
 	assert(node);
 
-	next = ll_start(&queue->nodes_ready);
-	nq = ll_next(&queue->nodes_ready, &next);
+	ll_start(&queue->nodes_ready);
+	nq = ll_next(&queue->nodes_ready);
 	while (nq) {
 		assert(nq->node);
 		if (nq->node == node) {
@@ -173,14 +172,15 @@ int queue_check_node(queue_t *queue, node_t *node)
 			nq = NULL;
 		}
 		else {
-			nq = ll_next(&queue->nodes_ready, &next);
+			nq = ll_next(&queue->nodes_ready);
 		}
 	}
+	ll_finish(&queue->nodes_ready);
 	assert(found >= 0);
 
 	if (found == 0) {
-		next = ll_start(&queue->nodes_busy);
-		nq = ll_next(&queue->nodes_busy, &next);
+		ll_start(&queue->nodes_busy);
+		nq = ll_next(&queue->nodes_busy);
 		while (nq) {
 			assert(nq->node);
 			if (nq->node == node) {
@@ -188,14 +188,15 @@ int queue_check_node(queue_t *queue, node_t *node)
 				nq = NULL;
 			}
 			else {
-				nq = ll_next(&queue->nodes_busy, &next);
+				nq = ll_next(&queue->nodes_busy);
 			}
 		}
+		ll_finish(&queue->nodes_busy);
 		assert(found >= 0);
 
 		if (found == 0) {
-			next = ll_start(&queue->nodes_waiting);
-			nq = ll_next(&queue->nodes_waiting, &next);
+			ll_start(&queue->nodes_waiting);
+			nq = ll_next(&queue->nodes_waiting);
 			while (nq) {
 				assert(nq->node);
 				if (nq->node == node) {
@@ -203,22 +204,24 @@ int queue_check_node(queue_t *queue, node_t *node)
 					nq = NULL;
 				}
 				else {
-					nq = ll_next(&queue->nodes_waiting, &next);
+					nq = ll_next(&queue->nodes_waiting);
 				}
 			}
+			ll_finish(&queue->nodes_waiting);
 
 			if (found == 0) {
-				next = ll_start(&queue->nodes_consuming);
-				tmp = ll_next(&queue->nodes_consuming, &next);
+				ll_start(&queue->nodes_consuming);
+				tmp = ll_next(&queue->nodes_consuming);
 				while (tmp) {
 					if (tmp == node) {
 						found = -2;
 						tmp = NULL;
 					}
 					else {
-						tmp = ll_next(&queue->nodes_consuming, &next);
+						tmp = ll_next(&queue->nodes_consuming);
 					}
 				}
+				ll_finish(&queue->nodes_consuming);
 				assert(found <= 0);
 			}
 		}
@@ -236,7 +239,6 @@ int queue_check_node(queue_t *queue, node_t *node)
 static void queue_notify(queue_t *queue)
 {
 	node_t *node;
-	void *next;
 	short int exclusive;
 	
 	assert(queue->qid > 0);
@@ -246,9 +248,8 @@ static void queue_notify(queue_t *queue)
 
 	// now that we have our server object, we can go thru the list of nodes.  If
 	// any of them are controllers, then we need to send a consume request.
-	next = ll_start(queue->sysdata->nodelist);
-	node = ll_next(queue->sysdata->nodelist, &next);
-	while (node) {
+	ll_start(queue->sysdata->nodelist);
+	while ((node = ll_next(queue->sysdata->nodelist))) {
 		
 		if (BIT_TEST(node->flags, FLAG_NODE_CONTROLLER)) {
 
@@ -268,9 +269,8 @@ static void queue_notify(queue_t *queue)
 		else {
 			assert(node->controller == NULL);
 		}
-		
-		node = ll_next(queue->sysdata->nodelist, &next);
 	}
+	ll_finish(queue->sysdata->nodelist);
 }
 
 
@@ -283,44 +283,43 @@ void queue_cancel_node(node_t *node)
 	queue_t *queue;
 	node_queue_t *nq;
 	int found;
-	void *next_queue;
-	void *next_node;
 	
 	assert(node);
 	assert(node->sysdata);
 	assert(node->sysdata->queues);
 
-	next_queue = ll_start(node->sysdata->queues);
-	while ((queue = ll_next(node->sysdata->queues, &next_queue))) {
+	ll_start(node->sysdata->queues);
+	while ((queue = ll_next(node->sysdata->queues))) {
 		assert(queue->qid > 0);
 		assert(queue->name);
 
 		found = 0;
 		
 		// need to check this node in the busy list.
-		next_node = ll_start(&queue->nodes_busy);
-		nq = ll_next(&queue->nodes_busy, &next_node);
+		ll_start(&queue->nodes_busy);
+		nq = ll_next(&queue->nodes_busy);
 		while (nq && found == 0) {
 
 			assert(nq->node);
 			if (nq->node == node) {
 				logger(node->sysdata->logging, 2, "queue %d:'%s' removing node:%d from busy list", queue->qid, queue->name, node->handle);
 
-				ll_remove(&queue->nodes_busy, nq, next_node);
+				ll_remove(&queue->nodes_busy, nq);
 
 				free(nq);
 				nq = NULL;
 				found++;
 			}
 			else {
-				nq = ll_next(&queue->nodes_busy, &next_node);
+				nq = ll_next(&queue->nodes_busy);
 			}
 		}
+		ll_finish(&queue->nodes_busy);
 		
 		// ready
 		if (found == 0) {
-			next_node = ll_start(&queue->nodes_ready);
-			nq = ll_next(&queue->nodes_ready, &next_node);
+			ll_start(&queue->nodes_ready);
+			nq = ll_next(&queue->nodes_ready);
 			while (nq && found == 0) {
 	
 				assert(nq->node);
@@ -329,16 +328,17 @@ void queue_cancel_node(node_t *node)
 						"queue %d:'%s' removing node:%d from ready list",
 						queue->qid, queue->name, node->handle);
 	
-					ll_remove(&queue->nodes_ready, nq, next_node);
+					ll_remove(&queue->nodes_ready, nq);
 					
 					free(nq);
 					nq = NULL;
 					found++;
 				}
 				else {
-					nq = ll_next(&queue->nodes_ready, &next_node);
+					nq = ll_next(&queue->nodes_ready);
 				}
 			}
+			ll_finish(&queue->nodes_ready);
 		}
 		
 		if (found != 0) {
@@ -379,8 +379,8 @@ void queue_cancel_node(node_t *node)
 			assert(found == 0);
 		
 			// and waiting list.
-			next_node = ll_start(&queue->nodes_waiting);
-			nq = ll_next(&queue->nodes_waiting, &next_node);
+			ll_start(&queue->nodes_waiting);
+			nq = ll_next(&queue->nodes_waiting);
 			while (nq && found == 0) {
 	
 				assert(nq->node);
@@ -389,16 +389,17 @@ void queue_cancel_node(node_t *node)
 						"queue %d:'%s' removing node:%d from waitinglist",
 						queue->qid, queue->name, node->handle);
 	
-					ll_remove(&queue->nodes_waiting, nq, next_node);
+					ll_remove(&queue->nodes_waiting, nq);
 						
 					free(nq);
 					nq = NULL;
 					found++;
 				}
 				else {
-					nq = ll_next(&queue->nodes_waiting, &next_node);
+					nq = ll_next(&queue->nodes_waiting);
 				}
 			}
+			ll_finish(&queue->nodes_waiting);
 		}
 		
 		// the node has being removed from the queue, if there are no more nodes, and there are no messages in the queue, then the queue needs to be deleted.
@@ -419,6 +420,7 @@ void queue_cancel_node(node_t *node)
 			}
 		}
 	}
+	ll_finish(node->sysdata->queues);
 }
 
 
@@ -533,7 +535,6 @@ void queue_deliver(queue_t *queue)
 	message_t *msg, *tmp;
 	system_data_t *sysdata;
 	node_queue_t *nq;
-	void *next;
 
 	assert(queue);
 	assert(queue->sysdata);
@@ -560,16 +561,15 @@ void queue_deliver(queue_t *queue)
 			// if we have at least one node that is not busy, then we will send the message.
 			// even if a node is busy, we will send the broadcast to it.
 			if (ll_count(&queue->nodes_ready) > 0) {
-				next = ll_start(&queue->nodes_ready);
-				nq = ll_next(&queue->nodes_ready, &next);
-				while (nq) {
+				ll_start(&queue->nodes_ready);
+				while ((nq = ll_next(&queue->nodes_ready))) {
 					assert(nq->node);
 					logger(sysdata->logging, 2, "queue_deliver: sending broadcast msg to node:%d", nq->node->handle);
 					assert(msg->id == 0);
 					assert(msg->target_node == NULL);
 					sendMessage(nq->node, msg);
-					nq = ll_next(&queue->nodes_ready, &next);
 				}
+				ll_finish(&queue->nodes_ready);
 				
 				// since it is broadcast, we are not expecting a reply, so we can delete
 				// the message (it should already be removed from the node).
@@ -642,14 +642,13 @@ void queue_deliver(queue_t *queue)
 void queue_msg_done(queue_t *queue, node_t *node)
 {
 	node_queue_t *nq;
-	void *next;
 	
 	assert(queue);
 	assert(node);
 
 
-	next = ll_start(&queue->nodes_busy);
-	nq = ll_next(&queue->nodes_busy, &next);
+	ll_start(&queue->nodes_busy);
+	nq = ll_next(&queue->nodes_busy);
 	while (nq) {
 		assert(nq->node);
 		if (nq->node == node) {
@@ -659,14 +658,15 @@ void queue_msg_done(queue_t *queue, node_t *node)
 			nq->waiting --;
 			assert(nq->waiting >= 0);
 			
-			ll_remove(&queue->nodes_busy, nq, next);
+			ll_remove(&queue->nodes_busy, nq);
 			ll_push_tail(&queue->nodes_ready, nq);
 			nq = NULL;
 		}
 		else {
-			nq = ll_next(&queue->nodes_busy, &next);
+			nq = ll_next(&queue->nodes_busy);
 		}
 	}
+	ll_finish(&queue->nodes_busy);
 }
 
 
@@ -717,14 +717,13 @@ void queue_set_id(list_t *queues, const char *name, queue_id_t id)
 {
 	queue_t *q = NULL;
 	queue_t *tmp;
-	void *next;
 
 	assert(queues);
 	assert(name);
 	assert(id > 0);
 
-	next = ll_start(queues);
-	tmp = ll_next(queues, &next);
+	ll_start(queues);
+	tmp = ll_next(queues);
 	while (tmp) {
 		assert(tmp->name);
 		assert(tmp->qid > 0);
@@ -735,9 +734,10 @@ void queue_set_id(list_t *queues, const char *name, queue_id_t id)
 			tmp = NULL;
 		}
 		else {
-			tmp = ll_next(queues, &next);
+			tmp = ll_next(queues);
 		}
 	}
+	ll_finish(queues);
 }
 
 

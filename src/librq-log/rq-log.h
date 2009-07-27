@@ -1,6 +1,11 @@
 #ifndef __RQ_LOG_H
 #define __RQ_LOG_H
 
+#define RQ_LOG_VERSION  0x00001000
+#define RQ_LOG_VERSION_TEXT  "v0.10.00"
+
+
+
 #include <rq.h>
 #include <expbuf.h>
 
@@ -22,7 +27,6 @@
 #define LOG_UNKNOWN_T "UNKNOWN "
 
 
-
 //                                          null param (0 to 63)
 #define LOG_CMD_NOP              0
 #define LOG_CMD_CLEAR            1
@@ -36,7 +40,6 @@
 //                                          string (192 to 223)
 #define LOG_CMD_TEXT             192
 //                                          large string (224 to 255)
-
 
 
 

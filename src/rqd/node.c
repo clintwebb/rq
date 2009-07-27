@@ -193,7 +193,7 @@ static void node_closed(node_t *node)
 	sysdata = node->sysdata;
 	assert(sysdata->nodelist);
 	assert(ll_count(sysdata->nodelist) > 0);
-	ll_remove(sysdata->nodelist, node, NULL);
+	ll_remove(sysdata->nodelist, node);
 
 	// free the resources used by the node.
 	node_free(node);
@@ -565,14 +565,13 @@ node_t * node_create(system_data_t *sysdata, int handle)
 message_t * node_findoutmsg(node_t *node, msg_id_t msgid)
 {
 	message_t *msg, *tmp;
-	void *next;
 
 	assert(node);
 	assert(msgid > 0);
 	
 	msg = NULL;
-	next = ll_start(&node->out_msg);
-	tmp = ll_next(&node->out_msg, &next);
+	ll_start(&node->out_msg);
+	tmp = ll_next(&node->out_msg);
 	while (tmp) {
 		assert(tmp->id > 0);
 		if (tmp->id == msgid) {
@@ -580,9 +579,10 @@ message_t * node_findoutmsg(node_t *node, msg_id_t msgid)
 			tmp = NULL;
 		}
 		else {
-			tmp = ll_next(&node->out_msg, &next);
+			tmp = ll_next(&node->out_msg);
 		}
 	}
+	ll_finish(&node->out_msg);
 
 	return(msg);
 }

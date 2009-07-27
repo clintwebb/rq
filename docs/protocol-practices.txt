@@ -6,28 +6,26 @@ RQ uses a RISP based protocol
 Consuming a Queue.
 
 		RQ_CMD_CLEAR
-		RQ_CMD_CONSUME
 		RQ_CMD_QUEUE <tiny string>
 		RQ_CMD_MAX <tiny int>       [optional]
 		RQ_CMD_PRIORITY <tiny int>  [optional]
-		RQ_CMD_EXECUTE
+		RQ_CMD_CONSUME
 
 		This operation will result in:
 
 		RQ_CMD_CLEAR
 		RQ_CMD_QUEUE <tiny string>
 		RQ_CMD_QUEUEID <short int>
-		RQ_CMD_EXECUTE
+		RQ_CMD_CONSUMING
 
 		Which will indicate that the Queue ID can and should be used instead of the full queue string.
 
 Cancelling a Queue
 
 		RQ_CMD_CLEAR
-		RQ_CMD_CANCEL_QUEUE
 		RQ_CMD_QUEUE <short string> [optional]
 		RQ_CMD_QUEUEID <short int>  [optional]
-		RQ_CMD_EXECUTE
+		RQ_CMD_CANCEL_QUEUE
 
 		This operation requires at least a RQ_CMD_QUEUE or a RQ_CMD_QUEUEID.
 

@@ -2,8 +2,8 @@
 
 all: rq-log 
 
-DEBUG_LIBS=-lefence -lpthread
-#DEBUG_LIBS=
+#DEBUG_LIBS=-lefence -lpthread
+DEBUG_LIBS=
 
 
 ARGS=-Wall -O2

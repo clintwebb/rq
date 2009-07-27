@@ -1,8 +1,8 @@
 #ifndef __RQ_BLACKLIST_H
 #define __RQ_BLACKLIST_H
 
-#define RQ_BLACKLIST_VERSION  0x00010000
-#define RQ_BLACKLIST_VERSION_TEXT  "v1.00.00"
+#define RQ_BLACKLIST_VERSION  0x00010500
+#define RQ_BLACKLIST_VERSION_TEXT  "v1.05.00"
 
 #include <linklist.h>
 #include <risp.h>
@@ -16,12 +16,13 @@
 //-----------------------------------------------------------------------------
 // RISP Commands
 //-----------------------------------------------------------------------------
-//                                          null param (0 to 63)
+//                                          execute command (0 to 31)
 #define BL_CMD_NOP              0
 #define BL_CMD_CLEAR            1
-#define BL_CMD_EXECUTE          2
+#define BL_CMD_CHECK            2
 #define BL_CMD_DENY             3
 #define BL_CMD_ACCEPT           4
+//                                          flag byte (32 to 63)
 //                                          byte integer (64 to 95)
 //                                          short integer (96 to 127)
 //                                          large integer (128 to 159)

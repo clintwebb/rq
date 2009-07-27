@@ -108,52 +108,39 @@ void cmdRequest(void *base)
 
  	assert(node != NULL);
  	assert(node->handle >= 0);
-
- 	// clear any flags that are not compatible with this command.
- 	BIT_CLEAR(node->data.flags, DATA_FLAG_BROADCAST | DATA_FLAG_REPLY | DATA_FLAG_DELIVERED);
- 	
- 	// set our specific flag.
-	BIT_SET(node->data.flags, DATA_FLAG_REQUEST);
-
 	assert(node->sysdata);
 	logger(node->sysdata->logging, 3,
 		"node:%d REQUEST (flags:%x, mask:%x)", node->handle, node->data.flags, node->data.mask);
+
+	processRequest(node);	
 }
 
 
 void cmdReply(void *base)
 {
 	node_t *node = (node_t *) base;
+ 	
  	assert(node != NULL);
-
-	// a REPLY command should not have any other flags.
-	node->data.flags = DATA_FLAG_REPLY;
-	
-	// ensure only the legal data is used.
-	node->data.mask &= (DATA_MASK_ID | DATA_MASK_PAYLOAD);
-
+	assert(node->handle >= 0);
 	assert(node->sysdata);
 	logger(node->sysdata->logging, 3, 
 		"node:%d REPLY (flags:%x, mask:%x)", node->handle, node->data.flags, node->data.mask);
+
+	processReply(node);
 }
 
 void cmdBroadcast(void *base)
 {
 	node_t *node = (node_t *) base;
+	
  	assert(node);
-
- 	// ensure only the flags that are valid.
- 	node->data.flags &= (DATA_FLAG_REQUEST | DATA_FLAG_NOREPLY);
- 	// set our specific flag.
-	node->data.flags |= DATA_FLAG_BROADCAST;
-	node->data.flags |= DATA_FLAG_NOREPLY;		// broadcast implies noreply.
-	// ensure only the legal data is used.
-	node->data.mask &= (DATA_MASK_ID | DATA_MASK_TIMEOUT | DATA_MASK_QUEUEID | DATA_MASK_QUEUE | DATA_MASK_PAYLOAD);
-
+	assert(node->handle >= 0);
 	assert(node->sysdata);
 	logger(node->sysdata->logging, 3,
 		"node:%d BROADCAST (flags:%x, mask:%x)",
 		node->handle, node->data.flags, node->data.mask);
+
+	processBroadcast(node);
 }
 
 void cmdNoReply(void *base)
@@ -163,15 +150,9 @@ void cmdNoReply(void *base)
  	assert(node);
  	assert(node->handle >= 0);
 
- 	// Clear any flags that are not compatible.
-//  	BIT_CLEAR(node->data.flags, DATA_FLAG_REPLY | DATA_FLAG_CONSUME | DATA_FLAG_CANCEL_QUEUE | DATA_FLAG_CLOSING | DATA_FLAG_SERVER_FULL | DATA_FLAG_RECEIVED | DATA_FLAG_DELIVERED | DATA_FLAG_EXCLUSIVE);
- 	
  	// set our specific flag.
 	BIT_SET(node->data.flags, DATA_FLAG_NOREPLY);
 	
-	// ensure only the legal data is used.
-// 	BIT_CLEAR(node->data.mask, DATA_MASK_MAX);
-
 	assert(node->sysdata);
 	logger(node->sysdata->logging, 3,
 		"node:%d NOREPLY (flags:%x, mask:%x)",
@@ -184,12 +165,8 @@ void cmdExclusive(void *base)
 	node_t *node = (node_t *) base;
  	assert(node);
 
- 	// ensure only the flags that are valid.
- 	node->data.flags &= (DATA_FLAG_CONSUME);
  	// set our specific flag.
-	node->data.flags |= DATA_FLAG_EXCLUSIVE;
-	// ensure only the legal data is used.
-	node->data.mask &= ( DATA_MASK_QUEUE | DATA_MASK_MAX | DATA_MASK_PRIORITY);
+	BIT_SET(node->data.flags, DATA_FLAG_EXCLUSIVE);
 
 	assert(node->sysdata);
 	logger(node->sysdata->logging, 3,
@@ -203,18 +180,12 @@ void cmdClosing(void *base)
 	node_t *node = (node_t *) base;
  	assert(node);
 
- 	// ensure only the flags that are valid.
- 	BIT_CLEAR(node->data.flags, DATA_FLAG_CONSUME);
- 	BIT_CLEAR(node->data.flags, DATA_FLAG_REQUEST);
- 	BIT_CLEAR(node->data.flags, DATA_FLAG_REPLY);
- 	
- 	// set our specific flag.
-	BIT_SET(node->data.flags, DATA_FLAG_CLOSING);
-	
 	assert(node->sysdata);
 	logger(node->sysdata->logging, 3,
 		"node:%d CLOSING (flags:%x, mask:%x)",
 		node->handle, node->data.flags, node->data.mask);
+
+	processClosing(node);
 }
 
 
@@ -222,21 +193,14 @@ void cmdClosing(void *base)
 void cmdConsume(void *base)
 {
 	node_t *node = (node_t *) base;
- 	assert(node != NULL);
-
- 	// ensure only the flags that are valid.
- 	node->data.flags &= (DATA_FLAG_EXCLUSIVE);
  	
-	// a CONSUME command should not have any other flags.
-	node->data.flags |= DATA_FLAG_CONSUME;
-	
-	// ensure only the legal data is used.
-	node->data.mask &= (DATA_MASK_QUEUE | DATA_MASK_MAX | DATA_MASK_PRIORITY);
-
+ 	assert(node != NULL);
 	assert(node->sysdata != NULL);
 	logger(node->sysdata->logging, 3,
 		"node:%d CONSUME (flags:%x, mask:%x)",
 		node->handle, node->data.flags, node->data.mask);
+
+	processConsume(node);		
 }
 
 void cmdCancelQueue(void *base)
@@ -244,15 +208,11 @@ void cmdCancelQueue(void *base)
 	node_t *node = (node_t *) base;
  	assert(node != NULL);
 
-	// a CONSUME command should not have any other flags.
-	node->data.flags = DATA_FLAG_CANCEL_QUEUE;
-	
-	// ensure only the legal data is used.
-	node->data.mask &= (DATA_MASK_QUEUE | DATA_MASK_QUEUEID);
-
 	assert(node->sysdata != NULL);
 	logger(node->sysdata->logging, 3,
 		"node:%d CANCEL QUEUE (flags:%x, mask:%x)", node->handle, node->data.flags, node->data.mask);
+
+	processCancelQueue(node);
 }
 
 void cmdId(void *base, risp_int_t value)
@@ -362,7 +322,7 @@ void cmdPayload(void *base, risp_length_t length, risp_char_t *data)
 }
 
 
-
+#if (0)
 void cmdReceived(void *base)
 {
 	node_t *node = (node_t *) base;
@@ -380,86 +340,34 @@ void cmdReceived(void *base)
 		"node:%d RECEIVED (flags:%x, mask:%x)",
 		node->handle, node->data.flags, node->data.mask);
 }
+#endif
+
 
 void cmdDelivered(void *base)
 {
 	node_t *node = (node_t *) base;
  	
  	assert(node != NULL);
-
- 	// ensure only the flags that are valid.
-	BIT_CLEAR(node->data.flags, DATA_FLAG_REQUEST | DATA_FLAG_REPLY | DATA_FLAG_BROADCAST | DATA_FLAG_NOREPLY);
-
- 	// set our specific flag.
- 	BIT_SET(node->data.flags, DATA_FLAG_DELIVERED);
- 	
-	// ensure only the legal data is used.
-	BIT_CLEAR(node->data.mask, DATA_MASK_PRIORITY | DATA_MASK_TIMEOUT | DATA_MASK_PAYLOAD);
-
 	assert(node->sysdata != NULL);
 	logger(node->sysdata->logging, 3, 
 		"node:%d DELIVERED (flags:%x, mask:%x)",
 		node->handle, node->data.flags, node->data.mask);
+
+	processDelivered(node);
 }
 
-
-
-
-// This callback function is called when the CMD_EXECUTE command is received.  
-// It should look at the data received so far, and figure out what operation 
-// needs to be done on that data.  Since this is a simulation, and our 
-// protocol doesn't really do anything useful, we will not really do much in 
-// this example.   
-void cmdExecute(void *base) 
+void cmdConsuming(void *base)
 {
 	node_t *node = (node_t *) base;
- 	assert(node);
-	assert(node->sysdata);
-	
-	logger(node->sysdata->logging, 3,
-		"node:%d EXECUTE (flags:%X, mask:%X)",
+ 	
+ 	assert(node != NULL);
+	assert(node->sysdata != NULL);
+	logger(node->sysdata->logging, 3, 
+		"node:%d CONSUMING (flags:%x, mask:%x)",
 		node->handle, node->data.flags, node->data.mask);
 
-	if (BIT_TEST(node->data.flags, DATA_FLAG_REQUEST)) {
-		processRequest(node);
-	}
-	else if (BIT_TEST(node->data.flags, DATA_FLAG_REPLY)) {
-		processReply(node);
-	}
-	else if (BIT_TEST(node->data.flags, DATA_FLAG_DELIVERED)) {
-		processDelivered(node);
-	}
-	else if (BIT_TEST(node->data.flags, DATA_FLAG_BROADCAST) && BIT_TEST(node->data.flags, DATA_FLAG_NOREPLY)) {
-		// if we receive a BROADCAST, but not a REQUEST, then it is not a requesst, and should also not expect a reply.
-		assert(! BIT_TEST(node->data.flags, DATA_FLAG_REQUEST));
-		processBroadcast(node);
-	}
-	else if (BIT_TEST(node->data.flags, DATA_FLAG_CONSUME)) {
-		processConsume(node);
-	}
-	else if (BIT_TEST(node->data.flags, DATA_FLAG_CANCEL_QUEUE)) {
-		processCancelQueue(node);
-	}
-	else if (BIT_TEST(node->data.flags, DATA_FLAG_CLOSING)) {
-		processClosing(node);
-	}
-	else if (BIT_TEST(node->data.flags, DATA_FLAG_SERVER_FULL)) {
-		processServerFull(node);
-	}
-	else if (BIT_TEST(node->data.mask, DATA_MASK_QUEUEID) && BIT_TEST(node->data.mask, DATA_MASK_QUEUE)) {
-		processQueueLink(node);
-	}
-	else {
-		// while primary development is occuring will leave this assert in to catch some simple programming issues.  However, once this goes to production, this will need to be removed, because we want to ignore actions taht we dont understand.  This could mean that a new protocol has a command we dont know how to understand.  So we ignore it.
-		
-		logger(node->sysdata->logging, 1, 
-			"node:%d EXECUTE failed (flags:%x, mask:%x)",
-				node->handle, node->data.flags, node->data.mask);
-		
-		assert(0);
-	}
+	processQueueLink(node);
 }
-
 
 
 void command_init(risp_t *risp)
@@ -467,17 +375,18 @@ void command_init(risp_t *risp)
   assert(risp);
 	risp_add_invalid(risp, &cmdInvalid);
 	risp_add_command(risp, RQ_CMD_CLEAR,        &cmdClear);
-	risp_add_command(risp, RQ_CMD_EXECUTE,      &cmdExecute);
+// 	risp_add_command(risp, RQ_CMD_EXECUTE,      &cmdExecute);
 	risp_add_command(risp, RQ_CMD_PING,         &cmdPing);
 	risp_add_command(risp, RQ_CMD_PONG,         &cmdPong);
 	risp_add_command(risp, RQ_CMD_REQUEST,      &cmdRequest);
 	risp_add_command(risp, RQ_CMD_REPLY,        &cmdReply);
-	risp_add_command(risp, RQ_CMD_RECEIVED,     &cmdReceived);
+// 	risp_add_command(risp, RQ_CMD_RECEIVED,     &cmdReceived);
 	risp_add_command(risp, RQ_CMD_DELIVERED,    &cmdDelivered);
 	risp_add_command(risp, RQ_CMD_BROADCAST,    &cmdBroadcast);
 	risp_add_command(risp, RQ_CMD_NOREPLY,      &cmdNoReply);
 	risp_add_command(risp, RQ_CMD_CONSUME,      &cmdConsume);
 	risp_add_command(risp, RQ_CMD_CANCEL_QUEUE, &cmdCancelQueue);
+	risp_add_command(risp, RQ_CMD_CONSUMING,    &cmdConsuming);
 	risp_add_command(risp, RQ_CMD_CLOSING,      &cmdClosing);
 	risp_add_command(risp, RQ_CMD_EXCLUSIVE,    &cmdExclusive);
 	risp_add_command(risp, RQ_CMD_QUEUEID,      &cmdQueueID);

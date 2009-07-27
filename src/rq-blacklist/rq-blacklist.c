@@ -32,14 +32,12 @@
 
 
 
-
-
 #define PACKAGE						"rq-blacklist"
 #define VERSION						"1.0"
 
 
-#if (RQ_BLACKLIST_VERSION != 0x00010000)
-	#error "This version designed only for v1.00.00 of librq-blacklist"
+#if (RQ_BLACKLIST_VERSION != 0x00010500)
+	#error "This version designed only for v1.05.00 of librq-blacklist"
 #endif
 
 
@@ -84,6 +82,7 @@ typedef struct {
 
 
 
+
 static void config_unload(control_t *control) {
 	entry_t *entry;
 
@@ -103,17 +102,25 @@ static void config_unload(control_t *control) {
 
 static void csv_data (void *s, size_t len, void *data)
 {
+	char str[32];
 	control_t *control = data;
-	in_addr_t value;
+	
 
 	assert(s);
 	assert(control);
+
+	assert(len > 0);
+	assert(len < 32);
+	memcpy(str, s, len);
+	str[len] = '\0';
 	
-	if (control->start == 0 || control->end == 0) {
-		value = inet_addr(s);
-		assert(value != 0);
-		if (control->start == 0) control->start = value;
-		else if (control->end == 0) control->end = value;
+	if (control->start == 0) {
+		control->start = ntohl(inet_addr(str));
+		assert(control->start != 0);
+	}
+	else if (control->end == 0) {
+		control->end = ntohl(inet_addr(str));
+		assert(control->end != 0);
 	}
 }
 
@@ -126,7 +133,7 @@ static void csv_line (int c, void *data)
 	assert(data);
 
 	if (control->start != 0 && control->end != 0) {
-		if (control->end > control->start) {
+		if (control->end >= control->start) {
 		
 			entry = (entry_t *)	malloc(sizeof(entry_t));
 			assert(entry);
@@ -134,18 +141,19 @@ static void csv_line (int c, void *data)
 			entry->start = control->start;
 			entry->end = control->end;
 
-			printf("%u - %u\n", entry->start, entry->end);
+			control->start = 0;
+			control->end = 0;
 
 			if (control->entries == NULL) {
 				control->entries = (list_t *) malloc(sizeof(list_t));
 				ll_init(control->entries);
-				ll_push_tail(control->entries, entry);
 			}
 			else {
 				tmp = ll_get_tail(control->entries);
-				assert(entry->start > tmp->end);
-				ll_push_tail(control->entries, entry);
+				assert(tmp);
+				assert(tmp->end < entry->start);
 			}
+			ll_push_tail(control->entries, entry);
 		}
 		else {
 			assert(0);
@@ -265,8 +273,9 @@ static void message_handler(rq_message_t *msg, void *arg)
 
 	assert(control->rqsvc);
 	assert(control->rqsvc->rq);
-	assert(msg->rq);
-	assert(control->rqsvc->rq == msg->rq);
+	assert(msg->conn);
+	assert(msg->conn->rq);
+	assert(control->rqsvc->rq == msg->conn->rq);
 
 	assert(control->risp);
 	assert(msg->data);
@@ -284,10 +293,6 @@ static void message_handler(rq_message_t *msg, void *arg)
 
 
 
-static void cmdNop(control_t *ptr) 
-{
-	assert(ptr != NULL);
-}
 
 static void cmdInvalid(control_t *ptr, void *data, risp_length_t len)
 {
@@ -320,7 +325,7 @@ static void cmdClear(control_t *ptr)
 // This callback function is called when the CMD_EXECUTE command is received.  
 // It should look at the data received so far, and figure out what operation 
 // needs to be done on that data.
-static void cmdExecute(control_t *ptr) 
+static void cmdCheck(control_t *ptr)
 {
 
  	assert(ptr);
@@ -454,7 +459,7 @@ int main(int argc, char **argv)
 	assert(control->risp != NULL);
 	risp_add_invalid(control->risp, cmdInvalid);
 	risp_add_command(control->risp, BL_CMD_CLEAR, 	 &cmdClear);
-	risp_add_command(control->risp, BL_CMD_EXECUTE,  &cmdExecute);
+	risp_add_command(control->risp, BL_CMD_CHECK,    &cmdCheck);
  	risp_add_command(control->risp, BL_CMD_IP,       &cmdIP);
  	
 	// initialise signal handlers.
@@ -521,6 +526,7 @@ int main(int argc, char **argv)
 	// the rq service sub-system has no real way of knowing when the event-base
 	// has been cleared, so we need to tell it.
 	rq_svc_setevbase(service, NULL);
+	control->rqsvc = NULL;
 
 
 	// unload the config entries.

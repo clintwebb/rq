@@ -31,7 +31,7 @@ void sendConsumeReply(node_t *node, char *queue, int qid)
 	addCmd(build, RQ_CMD_CLEAR);
 	addCmdInt(build, RQ_CMD_QUEUEID, qid);
 	addCmdShortStr(build, RQ_CMD_QUEUE, strlen(queue), queue);
-	addCmd(build, RQ_CMD_EXECUTE);
+	addCmd(build, RQ_CMD_CONSUMING);
 
 	node_write_now(node, build->length, build->data);
 	expbuf_clear(build);
@@ -64,15 +64,15 @@ void sendMessage(node_t *node, message_t *msg)
 
 	// add the commands to the out queue.
 	addCmd(build, RQ_CMD_CLEAR);
+	addCmdInt(build, RQ_CMD_QUEUEID, q->qid);
+	addCmdLargeStr(build, RQ_CMD_PAYLOAD, msg->data->length, msg->data->data);
+
 
 	if (BIT_TEST(msg->flags, FLAG_MSG_BROADCAST)) {
 		// We are sending a broadcast message
-		assert(BIT_TEST(msg->flags, FLAG_MSG_NOREPLY));
 		assert(msg->id == 0);
 		assert(msg->target_node == NULL);
-
 		addCmd(build, RQ_CMD_BROADCAST);
-		addCmd(build, RQ_CMD_NOREPLY);
 	}
 	else {
 		assert(msg->target_node);
@@ -80,15 +80,10 @@ void sendMessage(node_t *node, message_t *msg)
 		if (BIT_TEST(msg->flags, FLAG_MSG_NOREPLY)) 
 			addCmd(build, RQ_CMD_NOREPLY);
 		
-		addCmd(build, RQ_CMD_REQUEST);
-
 		assert(msg->id > 0);
 		addCmdLargeInt(build, RQ_CMD_ID, msg->id);
+		addCmd(build, RQ_CMD_REQUEST);
 	}
-
-	addCmdInt(build, RQ_CMD_QUEUEID, q->qid);
-	addCmdLargeStr(build, RQ_CMD_PAYLOAD, msg->data->length, msg->data->data);
-	addCmd(build, RQ_CMD_EXECUTE);
 
 	node_write_now(node, build->length, build->data);
 	expbuf_clear(build);
@@ -113,7 +108,6 @@ void sendDelivered(node_t *node, message_id_t msgid)
 	addCmd(build, RQ_CMD_CLEAR);
 	addCmdLargeInt(build, RQ_CMD_ID, (short int) msgid);
 	addCmd(build, RQ_CMD_DELIVERED);
-	addCmd(build, RQ_CMD_EXECUTE);
 
 	node_write_now(node, build->length, build->data);
 	expbuf_clear(build);
@@ -140,9 +134,8 @@ void sendUndelivered(node_t *node, message_id_t msgid)
 
 	// add the commands to the out queue.
 	addCmd(build, RQ_CMD_CLEAR);
-	addCmd(build, RQ_CMD_UNDELIVERED);
 	addCmdLargeInt(build, RQ_CMD_ID, (short int) msgid);
-	addCmd(build, RQ_CMD_EXECUTE);
+	addCmd(build, RQ_CMD_UNDELIVERED);
 
 	node_write_now(node, build->length, build->data);
 	expbuf_clear(build);
@@ -174,7 +167,6 @@ void sendClosing(node_t *node)
 	// add the commands to the out queue.
 	addCmd(build, RQ_CMD_CLEAR);
 	addCmd(build, RQ_CMD_CLOSING);
-	addCmd(build, RQ_CMD_EXECUTE);
 	
 	node_write_now(node, build->length, build->data);
 	expbuf_clear(build);
@@ -201,14 +193,11 @@ void sendConsume(node_t *node, char *queue, short int max, unsigned char priorit
 
 	// add the commands to the out queue.
 	addCmd(build, RQ_CMD_CLEAR);
-	addCmd(build, RQ_CMD_CONSUME);
 	addCmdShortStr(build, RQ_CMD_QUEUE, strlen(queue), queue);
 	addCmdInt(build, RQ_CMD_MAX, max);
 	addCmdShortInt(build, RQ_CMD_PRIORITY, priority);
-	if (exclusive != 0) {
-		addCmd(build, RQ_CMD_EXCLUSIVE);
-	}
-	addCmd(build, RQ_CMD_EXECUTE);
+	if (exclusive != 0) { addCmd(build, RQ_CMD_EXCLUSIVE); }
+	addCmd(build, RQ_CMD_CONSUME);
 
 	node_write_now(node, build->length, build->data);
 	expbuf_clear(build);

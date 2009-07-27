@@ -14,8 +14,8 @@
 // services can ensure that the correct version is installed.
 // This version number should be incremented with every change that would
 // effect logic.
-#define LIBRQ_VERSION  0x00010500
-#define LIBRQ_VERSION_NAME "v1.05.00"
+#define LIBRQ_VERSION  0x00010505
+#define LIBRQ_VERSION_NAME "v1.05.05"
 
 
 #if (LIBEVENT_VERSION_NUMBER < 0x02000100)
@@ -62,12 +62,6 @@
 // buffer, so this is just a minimum starting point.
 #define RQ_DEFAULT_BUFFSIZE	1024
 
-// The messages sent through the controller can be of 3 types.  These defines
-// would really only be used by the external handles to determine what it is.
-#define RQ_TYPE_REQUEST				1
-#define RQ_TYPE_REPLY					2
-#define RQ_TYPE_BROADCAST     3
-
 // The priorities are used to determine which node to send a request to.  A
 // priority of NONE indicates taht this node should only receive broadcast
 // messages, and no actual requests.
@@ -83,12 +77,11 @@
 /// execute commands (0 to 31)
 #define RQ_CMD_NOP              0
 #define RQ_CMD_CLEAR            1
-// #define RQ_CMD_EXECUTE          2
 #define RQ_CMD_PING             5
 #define RQ_CMD_PONG             6
 #define RQ_CMD_REQUEST          10
 #define RQ_CMD_REPLY            11
-#define RQ_CMD_RECEIVED         12
+// #define RQ_CMD_RECEIVED         12
 #define RQ_CMD_DELIVERED        13
 #define RQ_CMD_BROADCAST        14
 #define RQ_CMD_UNDELIVERED      16
@@ -96,6 +89,7 @@
 #define RQ_CMD_CANCEL_QUEUE     21
 #define RQ_CMD_CLOSING          22
 #define RQ_CMD_SERVER_FULL      23
+#define RQ_CMD_CONSUMING        24
 
 /// flags (32 to 63)
 #define RQ_CMD_EXCLUSIVE        32
@@ -141,35 +135,9 @@ typedef struct {
 } rq_t;
 
 
-typedef struct {
-	msg_id_t  id;
-	char      broadcast;
-	char      noreply;
-	expbuf_t *data;
-	void     *queue;
-	rq_t     *rq;
-} rq_message_t;
-
-typedef struct {
-	char *queue;
-	queue_id_t qid;
-	char exclusive;
-	short int max;
-	unsigned char priority;
-	
-	void (*handler)(rq_message_t *msg, void *arg);
-	void *arg;
-} rq_queue_t;
 
 
-#define RQ_DATA_FLAG_REQUEST      1
-#define RQ_DATA_FLAG_REPLY        2
-#define RQ_DATA_FLAG_RECEIVED     4
-#define RQ_DATA_FLAG_DELIVERED    8
-#define RQ_DATA_FLAG_BROADCAST    16
-#define RQ_DATA_FLAG_UNDELIVERED  32
-#define RQ_DATA_FLAG_CLOSING      64
-#define RQ_DATA_FLAG_SERVER_FULL  128
+
 #define RQ_DATA_FLAG_NOREPLY      256
 
 #define RQ_DATA_MASK_PRIORITY     1
@@ -211,6 +179,34 @@ typedef struct {
 	list_t *in_msgs, *out_msgs;
 
 } rq_conn_t;
+
+
+typedef struct {
+	msg_id_t  id;
+	char      broadcast;
+	char      noreply;
+	expbuf_t *data;
+	void     *queue;
+	rq_t     *rq;
+	rq_conn_t *conn;
+	enum {
+		rq_msgstate_new,
+		rq_msgstate_delivering,
+		rq_msgstate_delivered,
+		rq_msgstate_replied
+	} state;
+} rq_message_t;
+
+typedef struct {
+	char *queue;
+	queue_id_t qid;
+	char exclusive;
+	short int max;
+	unsigned char priority;
+	
+	void (*handler)(rq_message_t *msg, void *arg);
+	void *arg;
+} rq_queue_t;
 
 
 typedef struct {
@@ -263,7 +259,7 @@ void rq_consume(
 	void *arg);
 
 
-rq_message_t * rq_msg_new(rq_t *rq);
+rq_message_t * rq_msg_new(rq_t *rq, rq_conn_t *conn);
 void rq_msg_clear(rq_message_t *msg);
 void rq_msg_setqueue(rq_message_t *msg, char *queue);
 void rq_msg_setbroadcast(rq_message_t *msg);

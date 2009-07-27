@@ -13,7 +13,7 @@
 #include <stdlib.h>
 
 
-#if (RQ_BLACKLIST_VERSION != 0x00010000)
+#if (RQ_BLACKLIST_VERSION != 0x00010500)
 	#error "Incorrect header version"
 #endif
 
@@ -187,12 +187,12 @@ rq_blacklist_id_t rq_blacklist_check
 	// now send the message
 	assert(blacklist->queue);
 	assert(blacklist->rq);
-	msg = rq_msg_new(blacklist->rq);
+	msg = rq_msg_new(blacklist->rq, NULL);
 	rq_msg_setqueue(msg, blacklist->queue);
 	
 	rq_msg_addcmd(msg, BL_CMD_CLEAR);
 	rq_msg_addcmd_int(msg, BL_CMD_IP, ip);
-	rq_msg_addcmd(msg, BL_CMD_EXECUTE);
+	rq_msg_addcmd(msg, BL_CMD_CHECK);
 
 	// message has been prepared, so send it.
 	rq_send(blacklist->rq, msg, blacklist_handler, waiting);

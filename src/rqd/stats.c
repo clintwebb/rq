@@ -42,7 +42,6 @@ static void stats_handler(int fd, short int flags, void *arg)
 	int queues;
 	int msg_pending, msg_proc;
 	queue_t *q;
-	void *n;
 
 	assert(fd < 0);
 	assert((flags & EV_TIMEOUT) == EV_TIMEOUT);
@@ -67,12 +66,13 @@ static void stats_handler(int fd, short int flags, void *arg)
 	queues = 0;
 	msg_pending = 0;
 	msg_proc = 0;
-	n = ll_start(sysdata->queues);
-	while ((q = ll_next(sysdata->queues, &n))) {
+	ll_start(sysdata->queues);
+	while ((q = ll_next(sysdata->queues))) {
 		queues ++;
 		msg_pending += ll_count(&q->msg_pending);
 		msg_proc += ll_count(&q->msg_proc);
 	}
+	ll_finish(sysdata->queues);
 
 	assert(stats != NULL);
 	if (stats->in_bytes || stats->out_bytes || stats->requests || stats->replies || stats->broadcasts || stats->re || stats->we) {

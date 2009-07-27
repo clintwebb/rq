@@ -8,7 +8,7 @@
 
 #include "rq-http-config.h"
 
-#if (RQ_HTTP_CONFIG_VERSION != 0x00010100)
+#if (RQ_HTTP_CONFIG_VERSION != 0x00011000)
 	#error "Incorrect header version"
 #endif
 
@@ -101,10 +101,10 @@ static void rq_log_send(rq_log_t *log, unsigned short level, char *data, int len
 	assert(msg);
 	rq_msg_setqueue(msg, log->queue);
 	
-	rq_msg_addcmd(msg, LOG_CMD_CLEAR);
+	rq_msg_addcmd(msg,          LOG_CMD_CLEAR);
 	rq_msg_addcmd_shortint(msg, LOG_CMD_LEVEL, level);
-	rq_msg_addcmd_str(msg, LOG_CMD_TEXT, length, data);
-	rq_msg_addcmd(msg, LOG_CMD_EXECUTE);
+	rq_msg_addcmd_str(msg,      LOG_CMD_TEXT, length, data);
+	rq_msg_addcmd(msg,          LOG_CMD_LOOKUP);
 
 	// message has been prepared, so send it.
 	rq_send(log->rq, msg, NULL, NULL);

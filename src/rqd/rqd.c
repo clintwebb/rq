@@ -41,7 +41,7 @@
 static void usage(void) {
 	printf(PACKAGE " " VERSION "\n");
 	printf("-p <num>      TCP port to listen on (default: %d)\n", RQ_DEFAULT_PORT);
-	printf("-i <ip_addr>  interface to listen on, default is INDRR_ANY\n");
+	printf("-i <ip_addr>  interface to listen on, default is INADDR_ANY\n");
 	printf("-C <num>      max simultaneous connections, default is 1024\n");
 	printf("-S <ip:port>  Controller to connect to. (can be used more than once)\n");
 	printf("-l <file>     Local log file\n");
@@ -217,10 +217,7 @@ static void init_daemon(system_data_t *sysdata)
 	assert(sysdata);
 	assert(sysdata->settings);
 	if (sysdata->settings->daemonize != false) {
-		if (rq_daemon(sysdata->settings->username, sysdata->settings->pid_file, sysdata->settings->verbose) != 0) {
-			usage();
-			exit(EXIT_FAILURE);
-		}
+		rq_daemon(sysdata->settings->username, sysdata->settings->pid_file, sysdata->settings->verbose);
 	}
 }
 

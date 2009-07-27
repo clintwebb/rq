@@ -27,32 +27,14 @@
 #define VERSION						"1.0"
 
 
-#if (RQ_HTTP_CONFIG_VERSION != 0x00010100)
-	#error "This version designed only for v1.01.00 of librq-http-config"
+#if (RQ_HTTP_CONFIG_VERSION != 0x00011000)
+	#error "This version designed only for v1.10.00 of librq-http-config"
 #endif
 
 
 #if (LIBLINKLIST_VERSION < 0x00006000)
 	#error "liblinklist v0.6 or higher is required"
 #endif
-
-
-
-typedef struct {
-	// running params
-	short verbose;
-	short daemonize;
-	char *username;
-	char *pid_file;
-
-	// connections to the controllers.
-	list_t *controllers;
-
-	// unique settings.
-	char *configfile;
-	char *queue;
-} settings_t;
-
 
 
 
@@ -562,11 +544,6 @@ static void message_handler(rq_message_t *msg, void *arg)
 }
 
 
-static void cmdNop(control_t *ptr) 
-{
-	assert(ptr != NULL);
-}
-
 static void cmdInvalid(control_t *ptr, void *data, risp_length_t len)
 {
 	// this callback is called if we have an invalid command.  We shouldn't be receiving any invalid commands.
@@ -681,10 +658,9 @@ static void add_path(list_t *list, char *str, int len, char *queue)
 
 
 
-// This callback function is called when the CMD_EXECUTE command is received.  
-// It should look at the data received so far, and figure out what operation 
-// needs to be done on that data.
-static void cmdExecute(control_t *ptr) 
+// This callback function is called when the CMD_LOOKUP command is received.
+// We lookup the host and path info against the config, and return an appropriate path.
+static void cmdLookup(control_t *ptr)
 {
 	config_alias_t *alias;
 	config_host_t *host;
@@ -1011,7 +987,7 @@ int main(int argc, char **argv)
 	assert(control->risp != NULL);
 	risp_add_invalid(control->risp, cmdInvalid);
 	risp_add_command(control->risp, HCFG_CMD_CLEAR, 	 &cmdClear);
-	risp_add_command(control->risp, HCFG_CMD_EXECUTE,  &cmdExecute);
+	risp_add_command(control->risp, HCFG_CMD_LOOKUP,   &cmdLookup);
  	risp_add_command(control->risp, HCFG_CMD_HOST,     &cmdHost);
 	risp_add_command(control->risp, HCFG_CMD_PATH,     &cmdPath);
  	
@@ -1019,12 +995,12 @@ int main(int argc, char **argv)
 	assert(control);
 	assert(control->evbase);
 	assert(control->sigint_event == NULL);
-	control->sigint_event = evsignal_new(control->evbase, SIGINT, sigint_handler, control);
-	assert(control->sigint_event);
-	event_add(control->sigint_event, NULL);
 	assert(control->sighup_event == NULL);
+	control->sigint_event = evsignal_new(control->evbase, SIGINT, sigint_handler, control);
 	control->sighup_event = evsignal_new(control->evbase, SIGHUP, sighup_handler, control);
+	assert(control->sigint_event);
 	assert(control->sighup_event);
+	event_add(control->sigint_event, NULL);
 	event_add(control->sighup_event, NULL);
 
 	// load the config file that we assume is supplied.

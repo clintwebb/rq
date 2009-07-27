@@ -27,9 +27,6 @@ void processRequest(node_t *node)
 	assert(node->sysdata->queues);
 	assert(node->sysdata->bufpool);
 
-	// This function should not be called for a Broadcast message.
-	assert(BIT_TEST(node->data.flags, DATA_FLAG_BROADCAST) == 0);
-
 	// make sure we have the required data. At least payload, and a queueid or queue.
 	if (BIT_TEST(node->data.mask, DATA_MASK_PAYLOAD) && (BIT_TEST(node->data.mask, DATA_MASK_QUEUE) || BIT_TEST(node->data.mask, DATA_MASK_QUEUEID))) {
 
@@ -133,7 +130,6 @@ void processConsume(node_t *node)
 	
 	assert(node);
 	assert(node->sysdata);
-	assert(BIT_TEST(node->data.flags, DATA_FLAG_CONSUME));
 	
 	// make sure that we have the minimum information that we need.
 	if (BIT_TEST(node->data.mask, DATA_MASK_QUEUE)) {
@@ -253,9 +249,6 @@ void processBroadcast(node_t *node)
 	message_t *msg;
 	
 	assert(node != NULL);
-	assert(BIT_TEST(node->data.flags, DATA_FLAG_BROADCAST));
-	assert(BIT_TEST(node->data.flags, DATA_FLAG_NOREPLY));
-	assert(BIT_TEST(node->data.flags, DATA_FLAG_REQUEST) == 0);
 
 	// do we have a queue name, or a qid?
 	if (BIT_TEST(node->data.mask, DATA_MASK_QUEUE) || BIT_TEST(node->data.mask, DATA_MASK_QUEUEID)) {
@@ -335,13 +328,13 @@ void processDelivered(node_t *node)
 			
 			// then remove from node->out_msg
 			assert(msg->target_node);
-			ll_remove(&node->out_msg, msg, NULL);
+			ll_remove(&node->out_msg, msg);
 			msg->target_node = NULL;
 			
 			// then remove from the queue->msg_proc list
 			assert(msg->queue);
 			q = msg->queue;
-			ll_remove(&q->msg_proc, msg, NULL);
+			ll_remove(&q->msg_proc, msg);
 			msg->queue = NULL;
 			
 			// set action to remove the message.

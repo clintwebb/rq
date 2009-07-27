@@ -3,7 +3,7 @@
 all: rq-http
 
 ARGS=-Wall -O2
-LIBS=-lrispbuf -lrisp -levent_core -lexpbufpool -lmempool -lexpbuf -lrq -llinklist -lrq-http -lsqlite3
+LIBS=-lrispbuf -lrisp -levent_core -lexpbufpool -lmempool -lexpbuf -lrq -llinklist -lrq-http -lrq-blacklist
 OBJS=rq-http.o
 
 
