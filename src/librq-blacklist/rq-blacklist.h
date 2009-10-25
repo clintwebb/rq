@@ -45,6 +45,7 @@ typedef struct {
   int expires;
   list_t *cache;		/// cache_entry_t
   list_t *waiting;	/// cache_waiting_t
+  risp_t *risp;
 } rq_blacklist_t;
 
 

@@ -123,10 +123,8 @@ void sighup_handler(evutil_socket_t fd, short what, void *arg)
 
 	expbuf_print(buf, "Complete data dump\n");
 
-	assert(sysdata->msgpool);
-	expbuf_print(buf, "Mempool:\n\tActive=%u\n\tInactive=%u\n\n",
-		mempool_active_count(sysdata->msgpool),
-		mempool_inactive_count(sysdata->msgpool));
+	assert(sysdata->msg_list);
+	expbuf_print(buf, "Messages:\n\tMax=%d\n\tActive=%d\n\n", sysdata->msg_max, sysdata->msg_used);
 
 	assert(sysdata->in_buf);
 	assert(sysdata->build_buf);

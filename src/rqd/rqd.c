@@ -21,7 +21,6 @@
 #include <event.h>
 #include <expbufpool.h>
 #include <rq.h>
-#include <mempool.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -136,7 +135,6 @@ static void init_sysdata(system_data_t *sysdata)
 	sysdata->stats         = NULL;
 	sysdata->risp          = NULL;
 	sysdata->queues        = NULL;
-	sysdata->msgpool       = NULL;
 	sysdata->sighup_event  = NULL;
 	sysdata->sigint_event  = NULL;
 	sysdata->sigusr1_event = NULL;
@@ -146,11 +144,20 @@ static void init_sysdata(system_data_t *sysdata)
 	sysdata->logging       = NULL;
 	sysdata->in_buf        = NULL;
 	sysdata->build_buf     = NULL;
+
+	sysdata->msg_list = NULL;
+	sysdata->msg_max = 0;
+	sysdata->msg_next = 0;
 }
 
 static void cleanup_sysdata(system_data_t *sysdata)
 {
 	assert(sysdata);
+
+	assert(sysdata->msg_list == NULL);
+	assert(sysdata->msg_max == 0);
+	assert(sysdata->msg_used == 0);
+	assert(sysdata->msg_next == -1);
 	
 	assert(sysdata->evbase == NULL);
 	assert(sysdata->bufpool == NULL);
@@ -159,7 +166,6 @@ static void cleanup_sysdata(system_data_t *sysdata)
 	assert(sysdata->stats == NULL);
 	assert(sysdata->risp == NULL);
 	assert(sysdata->queues == NULL);
-	assert(sysdata->msgpool == NULL);
 	assert(sysdata->sighup_event == NULL);
 	assert(sysdata->sigint_event == NULL);
 	assert(sysdata->sigusr1_event == NULL);
@@ -402,6 +408,7 @@ static void cleanup_servers(system_data_t *sysdata)
 		free(server);
 	}
 
+	assert(ll_count(sysdata->servers) == 0);
 	ll_free(sysdata->servers);
 	free(sysdata->servers);
 	sysdata->servers = NULL;
@@ -472,26 +479,52 @@ static void cleanup_nodes(system_data_t *sysdata)
 	sysdata->nodelist = NULL;
 }
 
-// Create the message pool.
-static void init_msgpool(system_data_t *sysdata)
+//-----------------------------------------------------------------------------
+// Create the message array.  During the running of the daemon we should assume
+// that this array exists.  So we will create it, and pre-fill it with a number
+// of empty message objects.
+static void init_msglist(system_data_t *sysdata)
 {
+	int i;
+
 	assert(sysdata);
-	assert(sysdata->msgpool == NULL);
+	assert(sysdata->msg_list == NULL);
 	
-	sysdata->msgpool = (mempool_t *) malloc(sizeof(mempool_t));
-	mempool_init(sysdata->msgpool);
-	
+	sysdata->msg_list = (message_t **) malloc(sizeof(message_t *) * 10);
+	assert(sysdata->msg_list);
+	sysdata->msg_max = 10;
+	sysdata->msg_next = 0;
+	sysdata->msg_used = 0;
+
+	for (i=0; i<10; i++) {
+		sysdata->msg_list[i] = (message_t *) malloc(sizeof(message_t));
+		assert(sysdata->msg_list[i]);
+		message_init(sysdata->msg_list[i], i);
+	}
 }
 
-// Cleanup the message pool.
-static void cleanup_msgpool(system_data_t *sysdata)
+//-----------------------------------------------------------------------------
+// All the messages should have been processed or cancelled at this point.
+static void cleanup_msglist(system_data_t *sysdata)
 {
 	assert(sysdata);
-	assert(sysdata->msgpool);
+	assert(sysdata->msg_list);
+	assert(sysdata->msg_max > 0);
+	assert(sysdata->msg_used == 0);
+
+	while (sysdata->msg_max > 0) {
+		sysdata->msg_max --;
+		assert(sysdata->msg_list[sysdata->msg_max]);
+		assert(sysdata->msg_list[sysdata->msg_max]->id == sysdata->msg_max);
+		message_free(sysdata->msg_list[sysdata->msg_max]);
+		free(sysdata->msg_list[sysdata->msg_max]);
+		sysdata->msg_list[sysdata->msg_max] = NULL;
+	}
 	
-	mempool_free(sysdata->msgpool);
-	free(sysdata->msgpool);
-	sysdata->msgpool = NULL;
+	free(sysdata->msg_list);
+	sysdata->msg_list = NULL;
+	sysdata->msg_next = -1;
+	assert(sysdata->msg_max == 0);
 }
 
 // initialise the empty linked-list of queues.
@@ -517,6 +550,7 @@ static void cleanup_queues(system_data_t *sysdata)
 		queue_free(q);
 		free(q);
 	}
+	assert(ll_count(sysdata->queues) == 0);
 	ll_free(sysdata->queues);
 	free(sysdata->queues);
 	sysdata->queues = NULL;
@@ -559,6 +593,7 @@ static void cleanup_controllers(system_data_t *sysdata)
 		controller_free(ct);
 		free(ct);
 	}
+	assert(ll_count(sysdata->controllers) == 0);
 	ll_free(sysdata->controllers);
 	free(sysdata->controllers);
 	sysdata->controllers = NULL;
@@ -596,7 +631,7 @@ int main(int argc, char **argv)
 	init_stats(&sysdata);
 	init_risp(&sysdata);
 	init_nodes(&sysdata);
-	init_msgpool(&sysdata);
+	init_msglist(&sysdata);
 	init_queues(&sysdata);
 	init_controllers(&sysdata);
 
@@ -619,7 +654,7 @@ int main(int argc, char **argv)
 	cleanup_events(&sysdata);
 	cleanup_controllers(&sysdata);
 	cleanup_queues(&sysdata);
-	cleanup_msgpool(&sysdata);
+	cleanup_msglist(&sysdata);
 	cleanup_nodes(&sysdata);
 	cleanup_risp(&sysdata);
 	cleanup_stats(&sysdata);

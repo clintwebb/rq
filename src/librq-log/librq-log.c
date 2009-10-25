@@ -78,7 +78,7 @@ static void rq_log_send(rq_log_t *log, unsigned short level, char *data, int len
 	rq_msg_addcmd(msg,          LOG_CMD_EXECUTE);
 
 	// message has been prepared, so send it.
-	rq_send(log->rq, msg, NULL, NULL);
+	rq_send(msg, NULL, NULL, NULL);
 
 	// msg is now controlled by the RQ system, so we set it to null so we dont
 	// modify something we no longer control.

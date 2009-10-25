@@ -46,7 +46,6 @@ void sendMessage(node_t *node, message_t *msg)
 	
 	assert(node != NULL);
 	assert(msg != NULL);
-	assert(node->sysdata == msg->sysdata);
 
 	assert(node->sysdata);
 	assert(node->sysdata->build_buf);
@@ -80,7 +79,7 @@ void sendMessage(node_t *node, message_t *msg)
 		if (BIT_TEST(msg->flags, FLAG_MSG_NOREPLY)) 
 			addCmd(build, RQ_CMD_NOREPLY);
 		
-		assert(msg->id > 0);
+		assert(msg->id >= 0);
 		addCmdLargeInt(build, RQ_CMD_ID, msg->id);
 		addCmd(build, RQ_CMD_REQUEST);
 	}
@@ -91,13 +90,45 @@ void sendMessage(node_t *node, message_t *msg)
 
 
 //-----------------------------------------------------------------------------
+// Send a message to the node.  
+void sendReply(node_t *node, message_t *msg)
+{
+	expbuf_t *build;
+	
+	assert(node);
+	assert(msg);
+
+	assert(node->sysdata);
+	assert(node->sysdata->build_buf);
+	build = node->sysdata->build_buf;
+	assert(BUF_LENGTH(build) == 0);
+
+	assert(msg->data);
+	assert(msg->source_id >= 0);
+	assert(BIT_TEST(msg->flags, FLAG_MSG_NOREPLY) == 0);
+
+	logger(node->sysdata->logging, 2, "sendReply.  Node:%d, msg_id:%d", node->handle, msg->id);
+
+	// add the commands to the out queue.
+	addCmd(build, RQ_CMD_CLEAR);
+	addCmdLargeInt(build, RQ_CMD_ID, msg->source_id);
+	addCmdLargeStr(build, RQ_CMD_PAYLOAD, BUF_LENGTH(msg->data), BUF_DATA(msg->data));
+	addCmd(build, RQ_CMD_REPLY);
+
+	node_write_now(node, BUF_LENGTH(build), BUF_DATA(build));
+	expbuf_clear(build);
+}
+
+
+
+//-----------------------------------------------------------------------------
 
 void sendDelivered(node_t *node, message_id_t msgid)
 {
 	expbuf_t *build;
 	
 	assert(node);
-	assert(msgid > 0);
+	assert(msgid >= 0);
 
 	assert(node->sysdata);
 	assert(node->sysdata->build_buf);

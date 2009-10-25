@@ -94,7 +94,9 @@ static void server_event_handler(int hid, short flags, void *data)
 	assert(server->sysdata != NULL);
 
 	addrlen = sizeof(addr);
+	assert(sizeof(addr) >= sizeof(struct sockaddr));
 	sfd = accept(hid, (struct sockaddr *)&addr, &addrlen);
+	
 	if (sfd == -1) {
 		if (errno == EAGAIN || errno == EWOULDBLOCK) {
 				/* these are transient, so don't log anything */

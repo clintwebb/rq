@@ -1,0 +1,231 @@
+#!/bin/sh
+
+RQHOST=127.0.0.1
+WEBPORT=$RQHOST:8000
+
+EXAMPLE_PATH=/home/cjw/work/rq/src/example
+
+BLACKLIST_FILE=$EXAMPLE_PATH/blacklist.csv 
+STATIC_DIR=$EXAMPLE_PATH/static
+CONFIG_FILE=$EXAMPLE_PATH/config.db 
+#SITELOG=$EXAMPLE_PATH/logs/sitelog
+
+LOG_RQD_A=$EXAMPLE_PATH/logs/rqd-a
+LOG_RQD_B=$EXAMPLE_PATH/logs/rqd-b
+
+Q_BLACKLIST=example-blacklist
+Q_HTTPCONF=example-httpconfig
+Q_STATIC=example-static
+
+SINGLE_MODE=yes
+
+CC_A=$RQHOST:13700
+CC_B=$RQHOST:13701
+
+
+#################################################
+# First we should make everything.
+
+cd ~/work/rq/src/librq 
+make 
+test $? -gt 0 && exit
+sudo make install 
+test $? -gt 0 && exit
+cd - 
+
+cd ~/work/rq/src/librq-log 
+make 
+test $? -gt 0 && exit
+sudo make install 
+test $? -gt 0 && exit
+cd - 
+
+cd ~/work/rq/src/librq-http/ 
+make 
+test $? -gt 0 && exit
+sudo make install
+test $? -gt 0 && exit
+cd -
+
+cd ~/work/rq/src/librq-http-config/ 
+make 
+test $? -gt 0 && exit
+sudo make install
+test $? -gt 0 && exit
+cd -
+
+cd ~/work/rq/src/librq-blacklist 
+make 
+test $? -gt 0 && exit
+sudo make install
+test $? -gt 0 && exit
+cd -
+
+cd ~/work/rq/src/rqd/
+make
+test $? -gt 0 && exit
+sudo make install
+test $? -gt 0 && exit
+cd -
+
+#cd ~/work/rq/src/rq-log/
+#make
+#test $? -gt 0 && exit
+#sudo make install
+#test $? -gt 0 && exit
+#cd -
+
+cd ~/work/rq/src/rq-http-config/
+make
+test $? -gt 0 && exit
+sudo make install
+test $? -gt 0 && exit
+cd -
+
+cd ~/work/rq/src/rq-blacklist/
+make
+test $? -gt 0 && exit
+sudo make install
+test $? -gt 0 && exit
+cd -
+
+cd ~/work/rq/src/rq-http/
+make
+test $? -gt 0 && exit
+sudo make install
+test $? -gt 0 && exit
+cd -
+
+cd ~/work/rq/src/rq-http-static/
+make
+test $? -gt 0 && exit
+sudo make install
+test $? -gt 0 && exit
+cd -
+
+
+#################################################
+# clean up the logfile first.
+test -e $LOG_RQD_A && rm $_
+test -e $LOG_RQD_B && rm $_
+
+
+#################################################
+# Start up the bits
+
+### For a single controller system.
+if [ "$SINGLE_MODE" == "yes" ]
+then
+  rqd -vvv -p 13700 -l $LOG_RQD_A &
+  PID_RQD_A=$!
+  ALL_CC="-c $CC_A"
+else 
+  ### For a double-controller system.
+  rqd -vvv -p 13700 -S $CC_B -l $LOG_RQD_A &
+  PID_RQD_A=$!
+  rqd -vvv -p 13701 -S $CC_A -l $LOG_RQD_B &
+  PID_RQD_B=$!
+  ALL_CC="-c $CC_A,$CC_B"
+fi
+echo $ALL_CC
+
+if [ ! -z "$SITELOG" ] 
+then
+  rq-log $ALL_CC -l $SITELOG &
+  PID_LOG=$!
+fi
+
+rq-http-config $ALL_CC -vv -f $CONFIG_FILE -q $Q_HTTPCONF &
+PID_HTTP_CONF=$!
+echo "rq-http-config ($PID_HTTP_CONF) started."
+
+rq-blacklist $ALL_CC -vv -f $BLACKLIST_FILE -q $Q_BLACKLIST &
+PID_BLACKLIST=$!
+echo "rq-blacklist ($PID_BLACKLIST) started."
+
+rq-http-static $ALL_CC -vv -b $STATIC_DIR -i index.html -q $Q_STATIC &
+PID_HTTP_STATIC=$!
+echo "rq-http-static ($PID_HTTP_STATIC) started."
+
+rq-http $ALL_CC -vv -l $WEBPORT -C $Q_HTTPCONF -b $Q_BLACKLIST &
+PID_HTTP=$!
+echo "rq-http ($PID_HTTP) started."
+
+
+echo 
+echo 
+echo 
+echo "System now running."
+echo "Press Enter to stop."
+read
+echo
+
+if [ -n "$PID_HTTP_STATIC" ]
+then
+  echo
+  echo "Stopping rq-http-static. ($PID_HTTP_STATIC)"
+  kill -2 $PID_HTTP_STATIC
+  sleep 1
+fi
+
+if [ -n "$PID_HTTP_CONF" ]
+then
+  echo
+  echo "Stopping rq-http-config. ($PID_HTTP_CONF)"
+  kill -2 $PID_HTTP_CONF
+  sleep 1
+fi
+
+if [ -n "$PID_BLACKLIST" ]
+then
+  echo
+  echo "Stopping rq-blacklist. ($PID_BLACKLIST)"
+  kill -2 $PID_BLACKLIST
+  sleep 1
+fi
+
+if [ -n "$PID_HTTP" ]
+then
+  echo "Stopping rq-http. ($PID_HTTP)"
+  kill -2 $PID_HTTP
+  sleep 2
+  kill -9 $PID_HTTP
+  sleep 1
+fi
+
+if [ -n "$PID_LOG" ]
+then
+  echo
+  echo "Stopping rq-log. ($PID_LOG)"
+  kill -2 $PID_LOG
+  sleep 1
+fi
+
+echo "Stopping controllers. ($PID_RQD_A $PID_RQD_B)"
+if [ -n "$PID_RQD_B" ]
+then
+  kill -2 $PID_RQD_B
+  sleep 1
+fi
+
+if [ -n "$PID_RQD_A" ]
+then
+  kill -2 $PID_RQD_A
+  sleep 1
+fi
+
+test -n "$PID_HTTP_CONF" && wait $PID_HTTP_CONF
+echo "rq-http-config stopped."
+test -n "$PID_BLACKLIST" && wait $PID_BLACKLIST
+echo "rq-blacklist stopped."
+test -n "$PID_HTTP" && wait $PID_HTTP
+echo "rq-http stopped."
+test -n "$PID_LOG" && wait $PID_LOG
+echo "rq-log stopped."
+test -n "$PID_RQD_B" && wait $PID_RQD_B
+echo "rqd-b stopped."
+test -n "$PID_RQD_A" && wait $PID_RQD_A
+echo "rqd-a stopped."
+
+
+echo "Shutdown complete."

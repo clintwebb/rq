@@ -29,8 +29,8 @@ typedef struct {
 	         *out;
 	data_t data;
 	system_data_t *sysdata;
-	list_t in_msg,
-	       out_msg;
+// 	list_t in_msg;
+// 	list_t out_msg;
 	int idle;
 	controller_t *controller;
 } node_t ;

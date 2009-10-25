@@ -2,13 +2,13 @@ This document describes the protocol that will be used by nodes and controllers 
 
 RQ uses a RISP based protocol
 
-
 Consuming a Queue.
 
 		RQ_CMD_CLEAR
 		RQ_CMD_QUEUE <tiny string>
 		RQ_CMD_MAX <tiny int>       [optional]
 		RQ_CMD_PRIORITY <tiny int>  [optional]
+		RQ_CMD_EXCLUSIVE            [optional]
 		RQ_CMD_CONSUME
 
 		This operation will result in:
@@ -27,13 +27,109 @@ Cancelling a Queue
 		RQ_CMD_QUEUEID <short int>  [optional]
 		RQ_CMD_CANCEL_QUEUE
 
-		This operation requires at least a RQ_CMD_QUEUE or a RQ_CMD_QUEUEID.
+		* This operation requires at least a RQ_CMD_QUEUE or a RQ_CMD_QUEUEID.
+
+Consume Requests
+
+	Consumers will get messages to process.
+
+
 
 Sending a Request
+
+		RQ_CMD_CLEAR
+		RQ_CMD_ID <large int>
+		RQ_CMD_PAYLOAD <large str>
+		RQ_CMD_NOREPLY              [optional]
+		RQ_CMD_QUEUE <short string> [optional]
+		RQ_CMD_QUEUEID <short int>  [optional]
+		RQ_CMD_RETRIES <short int>  [optional]
+		RQ_CMD_REQUEST
+	
+		* This operation requires at least a RQ_CMD_QUEUE or a RQ_CMD_QUEUEID.
+
+	This will result in first a delivery notice, and then a reply.
+
+		RQ_CMD_CLEAR
+		RQ_CMD_ID <large int>
+		RQ_CMD_DELIVERED
+
+	And the reply
+		
+		RQ_CMD_CLEAR
+		RQ_CMD_ID <large int>
+		RQ_CMD_PAYLOAD <large str>
+		RQ_CMD_REPLY
+
+
 
 Request Undelivered.
 
 	If a request couldn't be delivered (either for timeout failure, or the controller has closed)
 				
 		RQ_CMD_CLEAR
-		RQ
+		RQ_CMD_ID <large int>
+		RQ_CMD_UNDELIVERED
+
+
+Broadcast Messages
+
+	Broadcast messages do not allow for replies, but will send a message to ALL
+	consumers of that specific queue.  Messages will not stay on the queue, they
+	will be delivered immediately to all currently existing nodes that are
+	consuming that queue.   There is no confirmation of delivery, and messages
+	will not be retried.
+
+		RQ_CMD_CLEAR
+		RQ_CMD_PAYLOAD <large str>
+		RQ_CMD_QUEUE <short string> [optional]
+		RQ_CMD_QUEUEID <short int>  [optional]
+		RQ_CMD_BROADCAST
+
+		* This operation requires at least a RQ_CMD_QUEUE or a RQ_CMD_QUEUEID.
+
+
+Ping / Pong
+
+	When there is no activity between the controller and node for 15 seconds,
+	they will both send PING commands.  When a PING command is received, it
+	should send a PONG command.    
+
+		RQ_CMD_PING
+
+	and it should get a
+
+		RQ_CMD_PONG
+
+	If a PING is sent from the controller, and no PONG is received, it will put
+	the node in an IDLE state and will not send it any messages (if it is a
+	consumer).  The controller will not close the connection of nodes that are
+	not responding (they may be busy doing work), it just wont send new work.
+
+	If a PING is sent from a node, and no PONG is received, it should
+	immediately attempt to connect to its alternate controllers.  Once
+	connected to the alternate controller it should drop the original connection
+	unless it is consuming messages from that controller.  
+
+Closing connection.
+
+	When the node is closing its connection to the server, it sends the closing
+	command.  The server will stop sending new information to the node, and will
+	close the connection when pending messages have been serviced.
+
+		RQ_CMD_CLOSING
+		
+
+Server Full.
+
+	A controller can only communicate to so many nodes.  If it is at capacity,
+	but is able to accept the connection, it will accept, but immediately send a
+	SERVER_FULL command and then close the connection.  If the client receives
+	this, it should move taht controller to the back of the list and attempt to
+	connect to another one.
+
+	If the client is unable to connect for any other reason it should do the same
+	thing.  Receiving the SERVER_FULL command just makes it a little quicker
+	rather than waiting for a timeout on the socket.
+
+

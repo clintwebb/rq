@@ -10,21 +10,42 @@
 
 
 //-----------------------------------------------------------------------------
-// Initialise a message object.
-void message_init(message_t *msg, system_data_t *sysdata)
+// reset a message that was in use.  Even though some data should have been
+// cleared as it was being processed, we will want to make sure that is so.
+void message_clear(message_t *msg)
 {
-	assert(msg != NULL);
-	assert(sysdata != NULL);
+	assert(msg);
+
+	assert(BIT_TEST(msg->flags, FLAG_MSG_ACTIVE));
+	assert(msg->id >= 0);
 	
-	msg->id = 0;
 	msg->flags = 0;
 	msg->timeout = 0;
-	msg->data = NULL;
 	msg->source_id = 0;
+	
+	assert(msg->source_node == NULL);
+	assert(msg->target_node == NULL);
+	assert(msg->queue == NULL);
+	assert(msg->data == NULL);
+}
+
+
+//-----------------------------------------------------------------------------
+// Initialise a message object.
+void message_init(message_t *msg, message_id_t id)
+{
+	assert(msg != NULL);
+	assert(id >= 0);
+
+	msg->id = id;
+	msg->flags = 0;
+	msg->timeout = 0;
+	msg->source_id = 0;
+	
+	msg->data = NULL;
 	msg->source_node = NULL;
 	msg->target_node = NULL;
 	msg->queue = NULL;
-	msg->sysdata = sysdata;
 }
 
 
@@ -32,31 +53,14 @@ void message_init(message_t *msg, system_data_t *sysdata)
 // free the resources in a message object (but not the object itself.)
 void message_free(message_t *msg)
 {
-	assert(msg != NULL);
-	assert(msg->sysdata != NULL);
+	assert(msg);
 
-	// If we are freeing the message, there shouldn't be anything referencing it.
-	assert(msg->source_node == NULL);
-	assert(msg->target_node == NULL);
-	assert(msg->queue == NULL);
-
-	if (msg->data != NULL) {
-		expbuf_clear(msg->data);
-		expbuf_pool_return(msg->sysdata->bufpool, msg->data);
-		msg->data = NULL;
-	}
+	assert(BIT_TEST(msg->flags, FLAG_MSG_ACTIVE) == 0);
+	
+	// there are no other resources to release that shouldn't have been cleaned up with message_clean().
 }
 
-//-----------------------------------------------------------------------------
-// Provides the pointer to the original node this message originated from.
-// When replies are received, they will be returned to this node.
-void message_set_orignode(message_t *msg, void *node)
-{
-	assert(msg != NULL);
-	assert(node != NULL);
-	assert(msg->source_node == NULL);
-	msg->source_node = node;
-}
+
 
 
 //-----------------------------------------------------------------------------
@@ -65,7 +69,7 @@ void message_set_orignode(message_t *msg, void *node)
 void message_set_origid(message_t *msg, message_id_t id)
 {
 	assert(msg != NULL);
-	assert(id > 0);
+	assert(id >= 0);
 	assert(msg->source_id == 0);
 	msg->source_id = id;
 }
@@ -80,6 +84,7 @@ void message_set_broadcast(message_t *msg)
 	BIT_SET(msg->flags, FLAG_MSG_BROADCAST);
 }
 
+
 //-----------------------------------------------------------------------------
 // Set the flag that indicates that we dont expect a reply to this message.
 void message_set_noreply(message_t *msg)
@@ -89,7 +94,7 @@ void message_set_noreply(message_t *msg)
 }
 
 
-//-----------------z------------------------------------------------------------
+//-----------------------------------------------------------------------------
 // Assign the queue object that this message belongs to.
 void message_set_queue(message_t *msg, void *queue)
 {
@@ -98,6 +103,7 @@ void message_set_queue(message_t *msg, void *queue)
 	assert(msg->queue == NULL);
 	msg->queue = queue;
 }
+
 
 //-----------------------------------------------------------------------------
 // If the message has a timeout, we need to know.
@@ -117,27 +123,5 @@ void message_set_timeout(message_t *msg, int seconds)
 }
 
 
-//-----------------------------------------------------------------------------
-// This action is used to delete a message.  It will only delete the message if
-// it is safe to do so.  If it cannot delete the message, it will simply exit,
-// returning the action.  When other activities occur that might allow for the
-// message to be deleted, it will raise the action again.
-void message_delete(message_t *msg)
-{
-	assert(msg);
-	assert(msg->sysdata);
-	assert(msg->sysdata->msgpool);
 
-	// if the flags indicate that the message has been decoupled,
-	if (msg->source_node == NULL && msg->target_node == NULL && msg->queue == NULL) {
-		// clear it, and add it back to the mempool we got it from.
-		message_free(msg);
-		mempool_return(msg->sysdata->msgpool, msg);
-	}
-	else {
-		logger(msg->sysdata->logging, 2,
-			"Unable to delete message(%X) since it is still referenced somewhere",
-			(unsigned int)msg);
-	}
-}
 

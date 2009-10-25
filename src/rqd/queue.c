@@ -53,11 +53,22 @@ void queue_free(queue_t *queue)
 		queue->name = NULL;
 	}
 
+	assert(ll_count(&queue->msg_pending) == 0);
 	ll_free(&queue->msg_pending);
+
+	assert(ll_count(&queue->msg_proc) == 0);
 	ll_free(&queue->msg_proc);
+
+	assert(ll_count(&queue->nodes_busy) == 0);
 	ll_free(&queue->nodes_busy);
+
+	assert(ll_count(&queue->nodes_ready) == 0);
 	ll_free(&queue->nodes_ready);
+
+	assert(ll_count(&queue->nodes_waiting) == 0);
 	ll_free(&queue->nodes_waiting);
+
+	assert(ll_count(&queue->nodes_consuming) == 0);
 	ll_free(&queue->nodes_consuming);
 }
 
@@ -320,7 +331,7 @@ void queue_cancel_node(node_t *node)
 		if (found == 0) {
 			ll_start(&queue->nodes_ready);
 			nq = ll_next(&queue->nodes_ready);
-			while (nq && found == 0) {
+			while (nq) {
 	
 				assert(nq->node);
 				if (nq->node == node) {
@@ -381,7 +392,7 @@ void queue_cancel_node(node_t *node)
 			// and waiting list.
 			ll_start(&queue->nodes_waiting);
 			nq = ll_next(&queue->nodes_waiting);
-			while (nq && found == 0) {
+			while (nq) {
 	
 				assert(nq->node);
 				if (nq->node == node) {
@@ -419,8 +430,31 @@ void queue_cancel_node(node_t *node)
 				}
 			}
 		}
+
+		// and the nodes_consuming list
+		ll_start(&queue->nodes_consuming);
+		nq = ll_next(&queue->nodes_consuming);
+		while (nq) {
+			assert(nq->node);
+			if (nq->node == node) {
+				logger(node->sysdata->logging, 2,
+					"queue %d:'%s' removing node:%d from consuminglist",
+					queue->qid, queue->name, node->handle);
+	
+				ll_remove(&queue->nodes_consuming, nq);
+				free(nq);
+				nq = NULL;
+			}
+			else {
+				nq = ll_next(&queue->nodes_consuming);
+			}
+		}
+		ll_finish(&queue->nodes_consuming);
+		
 	}
 	ll_finish(node->sysdata->queues);
+
+	
 }
 
 
@@ -532,7 +566,7 @@ int queue_add_node(queue_t *queue, node_t *node, int max, int priority, unsigned
 // messages in the queue, it will fire the action again.
 void queue_deliver(queue_t *queue)
 {
-	message_t *msg, *tmp;
+	message_t *msg;
 	system_data_t *sysdata;
 	node_queue_t *nq;
 
@@ -540,12 +574,14 @@ void queue_deliver(queue_t *queue)
 	assert(queue->sysdata);
 
 	sysdata = queue->sysdata;
-	
+
 	// when this function is fired, there should be at least one message in the
 	// queue to process.
 	assert(ll_count(&queue->msg_pending) > 0);
 	msg = ll_pop_head(&queue->msg_pending);
 	if (msg) {
+
+		assert(BIT_TEST(msg->flags, FLAG_MSG_ACTIVE));
 	
 		// check the message to see if it is broadcast.
 		if (BIT_TEST(msg->flags, FLAG_MSG_BROADCAST)) {
@@ -565,7 +601,6 @@ void queue_deliver(queue_t *queue)
 				while ((nq = ll_next(&queue->nodes_ready))) {
 					assert(nq->node);
 					logger(sysdata->logging, 2, "queue_deliver: sending broadcast msg to node:%d", nq->node->handle);
-					assert(msg->id == 0);
 					assert(msg->target_node == NULL);
 					sendMessage(nq->node, msg);
 				}
@@ -573,7 +608,16 @@ void queue_deliver(queue_t *queue)
 				
 				// since it is broadcast, we are not expecting a reply, so we can delete
 				// the message (it should already be removed from the node).
-				message_delete(msg);
+				assert(BIT_TEST(msg->flags, FLAG_MSG_ACTIVE));
+				message_clear(msg);
+
+				// at this point, we know about the message, but we dont really know
+				// it's id, so we wont update the 'next' value.  This is only a minor
+				// performance thing and we might spend more time trying to determine
+				// the id of this message than we would save.  This really only happens
+				// for broadcast messages, if we were using a REQUEST message, then we
+				// would actually know the ID when we got the REPLY back, so we could
+				// update the 'next' value then.  
 			}
 			else {
 				// we dont have any available nodes so we wont send the broadcast yet.
@@ -584,7 +628,9 @@ void queue_deliver(queue_t *queue)
 			}
 		}
 		else {
-			// This is a request.  Even requests with NOREPLY work the same at this point, because we keep the message in memory until DELIVERED is received.
+			// This is a request.  Even requests with NOREPLY work the same at this
+			// point, because we keep the message in memory until DELIVERED is
+			// received.
 	
 			// if we have a node that is ready, use it.
 			nq = ll_pop_head(&queue->nodes_ready);
@@ -593,12 +639,6 @@ void queue_deliver(queue_t *queue)
 				
 				// add the node pointer to the message.
 				msg->target_node = nq->node;
-
-				// add the message to the target node's list.
-				tmp = ll_get_head(&nq->node->out_msg);
-				if (tmp) { msg->id = tmp->id + 1; }
-				else { msg->id = 1; }
-				ll_push_head(&nq->node->out_msg, msg);
 
 				// send the message to the node.
 				logger(sysdata->logging, 2, "queue_deliver: sending msg to node:%d", nq->node->handle);

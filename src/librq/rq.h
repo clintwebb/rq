@@ -6,7 +6,7 @@
 #include <expbuf.h>
 #include <expbufpool.h>
 #include <linklist.h>
-#include <mempool.h>
+// #include <mempool.h>
 #include <risp.h>
 #include <rispbuf.h>
 
@@ -14,24 +14,24 @@
 // services can ensure that the correct version is installed.
 // This version number should be incremented with every change that would
 // effect logic.
-#define LIBRQ_VERSION  0x00010505
-#define LIBRQ_VERSION_NAME "v1.05.05"
+#define LIBRQ_VERSION  0x00010800
+#define LIBRQ_VERSION_NAME "v1.08.00"
 
 
-#if (LIBEVENT_VERSION_NUMBER < 0x02000100)
-	#error "Needs libEvent v2.00.01 or higher"
+#if (LIBEVENT_VERSION_NUMBER < 0x02000200)
+	#error "Needs libEvent v2.00.02 or higher"
 #endif
 
-#if (MEMPOOL_VERSION < 0x00010200)
-	#error "Needs libmempool v1.02.00 or higher"
-#endif
+// #if (MEMPOOL_VERSION < 0x00010200)
+// 	#error "Needs libmempool v1.02.00 or higher"
+// #endif
 
 #if (EXPBUF_VERSION < 0x00010200)
 	#error "Needs libexpbuf v1.2.1 or higher"
 #endif
 
-#if (LIBLINKLIST_VERSION < 0x00007000)
-	#error "Needs liblinklist v0.70 or higher"
+#if (LIBLINKLIST_VERSION < 0x00008000)
+	#error "Needs liblinklist v0.80 or higher"
 #endif
 
 
@@ -81,7 +81,6 @@
 #define RQ_CMD_PONG             6
 #define RQ_CMD_REQUEST          10
 #define RQ_CMD_REPLY            11
-// #define RQ_CMD_RECEIVED         12
 #define RQ_CMD_DELIVERED        13
 #define RQ_CMD_BROADCAST        14
 #define RQ_CMD_UNDELIVERED      16
@@ -122,13 +121,18 @@ typedef struct {
 	// linked-list of our connections.  Only the one at the head is likely to be
 	// active (although it might not be).  When a connection is dropped or is
 	// timed out, it is put at the bottom of the list.
-	list_t connlist;
+	list_t connlist;		/// rq_conn_t
 
 	// Linked-list of queues that this node is consuming.
-	list_t queues;
+	list_t queues;			/// rq_queue_t
 
 	// mempool of messages.
-	mempool_t *msgpool;
+	list_t *msg_pool;
+
+	void **msg_list;
+	int msg_max;
+	int msg_used;
+	int msg_next;
 
 	// Buffer pool.
 	expbuf_pool_t *bufpool;
@@ -166,27 +170,26 @@ typedef struct {
 	char active;
 	char closing;
 	char shutdown;
-	struct event *read_event, *write_event, *connect_event;
+	struct event *read_event;
+	struct event *write_event;
+	struct event *connect_event;
 	rq_t *rq;
 	risp_t *risp;
-	
 	char *hostname;
 	
 	expbuf_t *inbuf, *outbuf, *readbuf;
 	rq_data_t *data;
 	
-	// linked-lists of the messages that are being processed.
-	list_t *in_msgs, *out_msgs;
-
 } rq_conn_t;
 
 
-typedef struct {
+typedef struct __rq_message_t {
 	msg_id_t  id;
+	msg_id_t  src_id;
 	char      broadcast;
 	char      noreply;
 	expbuf_t *data;
-	void     *queue;
+	char     *queue;
 	rq_t     *rq;
 	rq_conn_t *conn;
 	enum {
@@ -195,6 +198,9 @@ typedef struct {
 		rq_msgstate_delivered,
 		rq_msgstate_replied
 	} state;
+	void (*reply_handler)(struct __rq_message_t *msg);
+	void (*fail_handler)(struct __rq_message_t *msg);
+	void *arg;
 } rq_message_t;
 
 typedef struct {
@@ -205,6 +211,9 @@ typedef struct {
 	unsigned char priority;
 	
 	void (*handler)(rq_message_t *msg, void *arg);
+	void (*accepted)(char *queue, queue_id_t qid, void *arg);
+	void (*dropped)(char *queue, queue_id_t qid, void *arg);
+	
 	void *arg;
 } rq_queue_t;
 
@@ -216,7 +225,7 @@ typedef struct {
 	int count;
 } rq_svc_helpoption_t;
 
-#define RQ_MAX_HELPOPTIONS 128
+#define RQ_MAX_HELPOPTIONS 127
 
 typedef struct {
 	char *svcname;
@@ -284,9 +293,14 @@ void rq_msg_setnoreply(rq_message_t *msg);
 void rq_msg_setdata(rq_message_t *msg, int length, char *data);
 
 
-void rq_send(rq_t *rq, rq_message_t *msg, void (*handler)(rq_message_t *reply, void *arg), void *arg);
+void rq_send(
+	rq_message_t *msg,
+	void (*reply_handler)(rq_message_t *reply),
+	void (*fail_handler)(rq_message_t *msg),
+	void *arg);
+
 void rq_resend(rq_message_t *msg);
-void rq_reply(rq_message_t *msg);
+void rq_reply(rq_message_t *msg, int length, char *data);
 
 
 /*---------------------------------------------------------------------------*/
@@ -318,6 +332,13 @@ int rq_svc_connect(
 	void (*connect_handler)(rq_service_t *service, void *arg),
 	void (*dropped_handler)(rq_service_t *service, void *arg),
 	void *arg);
+
+
+// This value is the number of elements we pre-create for the message list.
+// When the system is running, it should always assume that there is at least
+// something in the list.   The list will grow as the need arises, so this
+// number doesn't really matter much, except to maybe tune it a little better.
+#define DEFAULT_MSG_ARRAY 10
 
 
 #endif

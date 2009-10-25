@@ -45,6 +45,14 @@
 	#error "liblinklist v0.6 or higher is required"
 #endif
 
+#if (RISP_VERSION != 0x00010010)
+	#error "librisp v1.00.10 or higher is required"
+#endif
+
+#if (LIBRQ_VERSION < 0x00010710)
+	#error "librq v1.07.10 or higher is required"
+#endif
+
 
 
 
@@ -263,6 +271,15 @@ static void message_handler(rq_message_t *msg, void *arg)
 	control = (control_t *) arg;
 	assert(control);
 
+	assert(control->rqsvc);
+	assert(control->rqsvc->rq);
+	assert(msg->conn);
+	assert(msg->conn->rq);
+	assert(control->rqsvc->rq == msg->conn->rq);
+
+	assert(control->reply);
+	assert(BUF_LENGTH(control->reply) == 0);
+
 	// since we will only be processing one request at a time, and there are no
 	// paths for blocking when processing the request, we will put the request
 	// in the control structure.  If we were processing more than one, we would
@@ -271,26 +288,20 @@ static void message_handler(rq_message_t *msg, void *arg)
 	assert(control->req == NULL);
 	control->req = msg;
 
-	assert(control->rqsvc);
-	assert(control->rqsvc->rq);
-	assert(msg->conn);
-	assert(msg->conn->rq);
-	assert(control->rqsvc->rq == msg->conn->rq);
-
 	assert(control->risp);
 	assert(msg->data);
 	processed = risp_process(control->risp, control, BUF_LENGTH(msg->data), (risp_char_t *) BUF_DATA(msg->data));
 	assert(processed == BUF_LENGTH(msg->data));
 
 	// we need to get the reply and return it.  Has that been done?
-	assert(0);
-
-	// is this correct?   
-	assert(0);
+	assert(control->reply);
+	assert(BUF_LENGTH(control->reply) > 0);
+	rq_reply(msg, BUF_LENGTH(control->reply), BUF_DATA(control->reply));
+	expbuf_clear(control->reply);
+	msg = NULL;
 
 	control->req = NULL;
 }
-
 
 
 
@@ -308,6 +319,14 @@ static void cmdInvalid(control_t *ptr, void *data, risp_length_t len)
 	assert(0);
 }
 
+
+static void cmdNop(control_t *ptr)
+{
+ 	assert(ptr);
+}
+
+
+
 // This callback function is to be fired when the CMD_CLEAR command is 
 // received.  It should clear off any data received and stored in variables 
 // and flags.  In otherwords, after this is executed, the node structure 
@@ -316,8 +335,7 @@ static void cmdClear(control_t *ptr)
 {
  	assert(ptr);
 
- 	// clear the ip.
- 	assert(0);
+	ptr->ip = 0;
 }
 
 
@@ -327,13 +345,51 @@ static void cmdClear(control_t *ptr)
 // needs to be done on that data.
 static void cmdCheck(control_t *ptr)
 {
-
+	entry_t *entry;
+	int status = 0;
+	
  	assert(ptr);
- 	assert(ptr->req);
 
-	// lookup the data.
-	assert(0);
+	if (ptr->ip != 0) {
+		assert(ptr->entries);
+	 	assert(ptr->req);
+	 	assert(ptr->reply);
 
+	 	ll_start(ptr->entries);
+	 	entry = ll_next(ptr->entries);
+	 	while (entry) {
+			assert(entry->start != 0 && entry->end != 0);
+			assert(entry->end >= entry->start);
+
+			// the entries are sorted, so if the entry is greater than what we are looking for, then it is not here.
+			assert(status == 0);
+			if (entry->start > ptr->ip) {
+				entry = NULL;
+			}
+			else if (ptr->ip >= entry->start && ptr->ip <= entry->end) {
+				status = 1;
+				entry = NULL;
+		 	}
+		 	else {
+			 	entry = ll_next(ptr->entries);
+			}
+	 	}
+	 	ll_finish(ptr->entries);
+	}
+	assert(status == 0 || status == 1);
+
+	assert(ptr->reply);
+	assert(BUF_LENGTH(ptr->reply) == 0);
+	if (status == 0) {
+		// ip is not blocked.
+		addCmd(ptr->reply, BL_CMD_CLEAR);
+		addCmd(ptr->reply, BL_CMD_ACCEPT);
+	}
+	else {
+		// ip is blocked.
+		addCmd(ptr->reply, BL_CMD_CLEAR);
+		addCmd(ptr->reply, BL_CMD_DENY);
+	}
 }
 
 
@@ -341,7 +397,7 @@ static void cmdIP(control_t *ptr, int data)
 {
 	assert(ptr);
 
-	ptr->ip = data;
+	ptr->ip = ntohl((unsigned int)data);
 }
 
 
@@ -458,6 +514,7 @@ int main(int argc, char **argv)
 	control->risp = risp_init();
 	assert(control->risp != NULL);
 	risp_add_invalid(control->risp, cmdInvalid);
+	risp_add_command(control->risp, BL_CMD_NOP,      &cmdNop);
 	risp_add_command(control->risp, BL_CMD_CLEAR, 	 &cmdClear);
 	risp_add_command(control->risp, BL_CMD_CHECK,    &cmdCheck);
  	risp_add_command(control->risp, BL_CMD_IP,       &cmdIP);

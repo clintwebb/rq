@@ -40,9 +40,6 @@ void node_init(node_t *node, system_data_t *sysdata)
 	node->waiting = expbuf_pool_new(sysdata->bufpool, DEFAULT_BUFFSIZE);
 	node->out     = expbuf_pool_new(sysdata->bufpool, DEFAULT_BUFFSIZE);
 
-	ll_init(&node->in_msg);
-	ll_init(&node->out_msg);
-
 	data_init(&node->data);
 	
 	node->flags = 0;
@@ -52,6 +49,9 @@ void node_init(node_t *node, system_data_t *sysdata)
 	node->write_event = NULL;
 	node->idle = 0;
 	node->controller = NULL;
+
+
+	// TODO:  we should actually have a count in the node of the number of incoming and outgoing messages we are handling, so that when we delete the node, we make sure this value is 0.
 }
 
 
@@ -93,15 +93,11 @@ void node_free(node_t *node)
 	expbuf_pool_return(sysdata->bufpool, node->waiting);
 	node->waiting = NULL;
 
-	// make sure that all the messages for this node have been processed first.
-	// And then free the memory that was used for the list.
-	ll_free(&node->in_msg);
-	ll_free(&node->out_msg);
-
 	// make sure that this node has been removed from all consumer queues.
 	if (node->sysdata->queues)
 		queue_cancel_node(node);
 	
+	assert(node->data.payload == NULL);
 	data_clear(&node->data);
 
 	assert(node->sysdata != NULL);
@@ -117,7 +113,6 @@ void node_free(node_t *node)
 // will also cancel any requests that were pending replies to the node.
 static void node_closed(node_t *node)
 {
-	message_t *msg;
 	system_data_t *sysdata;
 	controller_t *ct;
 	
@@ -150,28 +145,6 @@ static void node_closed(node_t *node)
 		// we need to remove the consume on the queues.
 		assert(BIT_TEST(node->flags, FLAG_NODE_CONTROLLER) == 0);
 		queue_cancel_node(node);
-	}
-
-	// we need to remove (return) any messages that this node was processing.
-	while ((msg = ll_pop_head(&node->out_msg)) != NULL) {
-		// we have a message that we need to deal with.
-
-		// if this node was a destination for the message then we need to return
-		// a FAILURE to the source.
-		assert(0);
-
-		// if this node was a source, we need to send a CANCEL to the destination.
-		assert(0);
-
-		// detatch message from node, and the node from the message and then set
-		// an action to deal with the message.
-		assert(0);
-	}
-	
-	// we need to do something with the messages that this node is waiting replies for.,
-	while ((msg = ll_pop_head(&node->in_msg)) != NULL) {
-		// we have a message that we need to deal with.
-		assert(0);
 	}
 
 	if (node->write_event) {
@@ -495,23 +468,21 @@ void node_shutdown(node_t *node)
 
 	// We are still connected to the node, so we need to put a timeout on the
 	// messages the node is servicing.
-	if (node->handle != INVALID_HANDLE && (ll_count(&node->in_msg) > 0 || ll_count(&node->out_msg) > 0)) {
+// 	if (node->handle != INVALID_HANDLE && (ll_count(&node->in_msg) > 0 || ll_count(&node->out_msg) > 0)) {
 		// need to set a timeout on the messages.
-		assert(0);
-	}
-	else {
+// 		assert(0);
+// 	}
+// 	else {
 
 		// if we have done all we need to do, but still have a valid handle, then we should close it, and delete the event.
 		if (node->handle != INVALID_HANDLE && node->out->length == 0) {
 			assert(node->out->length == 0);
-			assert(ll_count(&node->in_msg) == 0);
-			assert(ll_count(&node->out_msg) == 0);
 			assert(node->handle > 0);
 			close(node->handle);
 			node->handle = INVALID_HANDLE;
 			node_closed(node);
 		}
-	}
+// 	}
 }
 
 
@@ -564,25 +535,19 @@ node_t * node_create(system_data_t *sysdata, int handle)
 // found (which it should have, right?)
 message_t * node_findoutmsg(node_t *node, msg_id_t msgid)
 {
-	message_t *msg, *tmp;
+	message_t *msg;
 
 	assert(node);
-	assert(msgid > 0);
+	assert(msgid >= 0);
+	assert(node->sysdata);
+	assert(node->sysdata->msg_list);
+	assert(node->sysdata->msg_max >= msgid);
 	
-	msg = NULL;
-	ll_start(&node->out_msg);
-	tmp = ll_next(&node->out_msg);
-	while (tmp) {
-		assert(tmp->id > 0);
-		if (tmp->id == msgid) {
-			msg = tmp;
-			tmp = NULL;
-		}
-		else {
-			tmp = ll_next(&node->out_msg);
-		}
-	}
-	ll_finish(&node->out_msg);
+	msg = node->sysdata->msg_list[msgid];
+	assert(msg);
+	assert(BIT_TEST(msg->flags, FLAG_MSG_ACTIVE));
+
+	assert(msg->target_node == node);
 
 	return(msg);
 }

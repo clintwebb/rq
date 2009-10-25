@@ -23,7 +23,8 @@ void data_clear(data_t *data)
 	data->priority = RQ_PRIORITY_NONE;
 	
 	expbuf_clear(&data->queue);
-	expbuf_clear(&data->payload);
+
+	assert(data->payload == NULL);
 }
 
 
@@ -34,7 +35,7 @@ void data_init(data_t *data)
 {
 	assert(data != NULL);
 	expbuf_init(&data->queue, 0);
-	expbuf_init(&data->payload, 0);
+	data->payload = NULL;
 	data_clear(data);
 }
 
@@ -46,7 +47,7 @@ void data_free(data_t *data)
 	assert(data != NULL);
 
 	expbuf_free(&data->queue);
-	expbuf_free(&data->payload);
+	assert(data->payload == NULL);
 }
 
 

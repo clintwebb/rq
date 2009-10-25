@@ -42,11 +42,13 @@ void settings_cleanup(settings_t *ptr)
 	assert(ptr != NULL);
 
 	while ((str = ll_pop_head(ptr->interfaces))) { free(str); }
+	assert(ll_count(ptr->interfaces) == 0);
 	ll_free(ptr->interfaces);
 	free(ptr->interfaces);
 	ptr->interfaces = NULL;
 	
 	while ((str = ll_pop_head(ptr->controllers))) { free(str); }
+	assert(ll_count(ptr->controllers) == 0);
 	ll_free(ptr->controllers);
 	free(ptr->controllers);
 	ptr->controllers = NULL;

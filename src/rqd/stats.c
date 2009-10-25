@@ -27,7 +27,8 @@ void stats_init(stats_t *stats)
 	stats->shutdown = 0;
 
 	stats->sysdata = NULL;
-}
+	stats->stats_event = NULL;
+} 
 
 
 
@@ -86,7 +87,7 @@ static void stats_handler(int fd, short int flags, void *arg)
 			stats->broadcasts,
 			queues,
 			msg_pending, msg_proc,
-			mempool_active_count(sysdata->msgpool), mempool_inactive_count(sysdata->msgpool),
+			sysdata->msg_used, sysdata->msg_max,
 			stats->re, stats->we, stats->te);
 		
 		stats->in_bytes = 0;

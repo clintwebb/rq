@@ -27,10 +27,6 @@
 #define VERSION						"1.0"
 
 
-#if (LIBRQ_VERSION < 0x00010710)
-	#error "librq v1.07.10 or higher is required"
-#endif
-
 #if (RQ_HTTP_CONFIG_VERSION != 0x00011500)
 	#error "This version designed only for v1.15.00 of librq-http-config"
 #endif
@@ -536,8 +532,9 @@ static void message_handler(rq_message_t *msg, void *arg)
 
 	// we need to get the reply and return it.  Has that been done?
 	assert(BUF_LENGTH(control->reply) > 0);
-	rq_reply(msg, BUF_LENGTH(control->reply), BUF_DATA(control->reply));
+	rq_msg_setdata(msg, BUF_LENGTH(control->reply), BUF_DATA(control->reply));
 	expbuf_clear(control->reply);
+	rq_reply(msg);
 	msg = NULL;
 
 	expbuf_clear(control->host);
@@ -585,8 +582,6 @@ static char * check_path(list_t *paths, expbuf_t *pathbuf)
 	assert(paths);
 	assert(pathbuf);
 
-	fprintf(stderr, "check_path: \"%s\"?\n", expbuf_string(pathbuf));
-
 	count = 0;
 	assert(paths);
 	ll_start(paths);
@@ -599,7 +594,7 @@ static char * check_path(list_t *paths, expbuf_t *pathbuf)
 
 		count++;
 
-//  		fprintf(stderr, "check_path: \"%s\" == \"%s\" ?\n", expbuf_string(pathbuf), path->path);
+// 		fprintf(stderr, "check_path: \"%s\" == \"%s\" ?\n", expbuf_string(pathbuf), path->path);
 
 		if (BUF_LENGTH(pathbuf) == path->length && strncmp(expbuf_string(pathbuf), path->path, path->length) == 0) {
 			queue = path->consumer;
@@ -647,65 +642,15 @@ static void parse_path(list_t *list, char *path)
 }
 
 
-// return the host entry based the host and path that are supplied.
-static config_host_t * lookup_host(control_t *ptr)
-{
-	config_host_t *host = NULL;
-	int count;
-	config_alias_t *alias;
-
-	assert(ptr);
-	assert(ptr->host);
-	assert(ptr->path);
-
-	assert(BUF_LENGTH(ptr->host) > 0);
-	assert(BUF_LENGTH(ptr->path) > 0);
-
-	count = 0;
-	assert(ptr->aliases);
-	ll_start(ptr->aliases);
-	alias = ll_next(ptr->aliases);
-	while (alias) {
-		assert(alias->alias);
-		assert(alias->length > 0);
-		assert(alias->host);
-		assert(host == NULL);
-
-		count ++;
-
-		// first do a quick check of the length, if they are the same, then
-		// actually compare the host and alias values.
-		if (BUF_LENGTH(ptr->host) == alias->length && strncasecmp(expbuf_string(ptr->host), alias->alias, alias->length) == 0) {
-			// hosts match.
-			host = alias->host;
-			assert(host);
-
-			// if the alias is not at the top of the list, we will move it to
-			// the top of the list to improve searching speed for the most used
-			// host names.
-			if (count > 1) {
-				ll_move_head(ptr->aliases, alias);
-			}
-
-			// we found what we are looking for, we dont need to search through the list anymore.
-			alias = NULL;
-		}
-		else {
-			alias = ll_next(ptr->aliases);
-		}
-	}
-	ll_finish(ptr->aliases);
-
-	return(host);
-}
-
 
 // This callback function is called when the CMD_LOOKUP command is received.
 // We lookup the host and path info against the config, and return an appropriate path.
 static void cmdLookup(control_t *ptr)
 {
+	config_alias_t *alias;
 	config_host_t *host;
 	char *queue;
+	int count;
 	int redirect;
 	expbuf_t *tmpbuf = NULL;
 	list_t *list_path;
@@ -728,6 +673,7 @@ static void cmdLookup(control_t *ptr)
 	if (BUF_LENGTH(ptr->host) == 0 || BUF_LENGTH(ptr->path) == 0) {
 
 		fprintf(stderr, "cmdLookup: host or path not supplied.\n");
+	
 		assert(ptr->reply);
 		assert(BUF_LENGTH(ptr->reply) == 0);
 		addCmd(ptr->reply, HCFG_CMD_CLEAR);
@@ -735,7 +681,39 @@ static void cmdLookup(control_t *ptr)
 	}
 	else {
 		// we've got both a host and a path, so we first need to lookup the host in our aliases list.
-		host = lookup_host(ptr);
+		count = 0;
+		host = NULL;
+		assert(ptr->aliases);
+		ll_start(ptr->aliases);
+		alias = ll_next(ptr->aliases);
+		while (alias) {
+			assert(alias->alias);
+			assert(alias->length > 0);
+
+			count ++;
+
+			// first do a quick check of the length, if they are the same, then
+			// actually compare the host and alias values.
+			if (BUF_LENGTH(ptr->host) == alias->length && strncasecmp(expbuf_string(ptr->host), alias->alias, alias->length) == 0) {
+				// hosts match.
+				host = alias->host;
+				assert(host);
+
+				// if the alias is not at the top of the list, we will move it to
+				// the top of the list to improve searching speed for the most used
+				// host names.
+				if (count > 1) {
+					ll_move_head(ptr->aliases, alias);
+				}
+
+				// we found what we are looking for, we dont need to search through the list anymore.
+				alias = NULL;
+			}
+			else {
+				alias = ll_next(ptr->aliases);
+			}
+		}
+		ll_finish(ptr->aliases);
 	
 		// check the config tables for the host/path combo.
 		if (host == NULL) {
@@ -783,6 +761,7 @@ static void cmdLookup(control_t *ptr)
 					assert(BUF_LENGTH(ptr->path) > 0);
 					tmpbuf = (expbuf_t *) malloc(sizeof(expbuf_t));
 					expbuf_init(tmpbuf, BUF_LENGTH(ptr->path) + 2);
+// 					expbuf_set(tmpbuf, "/", 1);
 					expbuf_set(tmpbuf, BUF_DATA(ptr->path), BUF_LENGTH(ptr->path));
 					
 					assert(BUF_LENGTH(ptr->path) > 0);
@@ -834,9 +813,6 @@ static void cmdLookup(control_t *ptr)
 						assert(ll_count(list_path) > 0);
 						segment = ll_pop_tail(list_path);
 						while (segment && queue == NULL) {
-
-							fprintf(stderr, "Adding '%s' to leftover.\n", segment);
-						
 							ll_push_head(list_leftover, segment);
 
 							// join the strings in the list together.  We cant just take
@@ -851,7 +827,7 @@ static void cmdLookup(control_t *ptr)
 								expbuf_add(joinbuf, joined, strlen(joined) );
 								joined = NULL;
 							}
-							if (BUF_LENGTH(joinbuf) > 1) { expbuf_add(joinbuf, "/", 1); }
+							expbuf_add(joinbuf, "/", 1);
 						
 							queue = check_path(host->paths, joinbuf);
 							if (queue == NULL) {
@@ -919,7 +895,7 @@ static void cmdLookup(control_t *ptr)
 
 				addCmd(ptr->reply, HCFG_CMD_CLEAR);
 				addCmdShortStr(ptr->reply, HCFG_CMD_QUEUE, strlen(queue), queue);
-				if (leftover_str && strlen(leftover_str) > 0)
+				if (leftover_str && strlen(path_str) > 0)
 					addCmdStr(ptr->reply, HCFG_CMD_LEFTOVER, strlen(leftover_str), leftover_str);
 				if (path_str && strlen(path_str) > 0)
 					addCmdStr(ptr->reply, HCFG_CMD_PATH, strlen(path_str), path_str);

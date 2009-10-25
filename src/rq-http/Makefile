@@ -2,14 +2,19 @@
 
 all: rq-http
 
+DEBUG_LIBS=
+# DEBUG_LIBS=-lefence -lpthread
+
 ARGS=-Wall -O2
-LIBS=-lrispbuf -lrisp -levent_core -lexpbufpool -lmempool -lexpbuf -lrq -llinklist -lrq-http -lrq-blacklist
+LIBS=-lrispbuf -lrisp -levent_core -lexpbufpool -lmempool -lexpbuf -lrq -llinklist -lrq-http -lrq-blacklist -lrq-http-config $(DEBUG_LIBS)
 OBJS=rq-http.o
 
 
+ 
 H_rq=/usr/include/rq.h
 H_rq_http=/usr/include/rq-http.h
 H_linklist=/usr/include/linklist.h
+
 
 
 rq-http: $(OBJS)

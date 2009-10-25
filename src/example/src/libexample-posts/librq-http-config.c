@@ -15,9 +15,6 @@
 	#error "Incorrect header version"
 #endif
 
-#if (LIBRQ_VERSION < 0x00010710)
-	#error "librq v1.07.10 or higher is required"
-#endif
 
 
 typedef struct {
@@ -96,6 +93,7 @@ static void add_entry(waiting_t *waiting)
 		entry->redirect = strdup(expbuf_string(waiting->redirect));
 	}
 	else {
+		assert(entry->queue);
 		entry->redirect = NULL;
 	}
 

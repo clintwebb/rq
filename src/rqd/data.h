@@ -1,6 +1,8 @@
 #ifndef __DATA_H
 #define __DATA_H
 
+#include "message.h"
+
 #include <expbuf.h>
 #include <risp.h>
 
@@ -31,14 +33,14 @@
 
 
 typedef struct {
-	int id;
+	msg_id_t id;
 	short int timeout;
 	short int max;
 	short int priority;
 	short int qid;
 	
 	expbuf_t queue;
-	expbuf_t payload;
+	expbuf_t *payload;
 
 	unsigned int mask;
 	unsigned int flags;

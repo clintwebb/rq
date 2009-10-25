@@ -29,9 +29,86 @@ typedef struct {
 typedef struct {
 	rq_blacklist_id_t id;
 	ev_uint32_t ip;
+	void (*handler)(rq_blacklist_status_t status, void *arg);
 	void *arg;
 	rq_blacklist_t *blacklist;
+  rq_message_t *msg;
 } cache_waiting_t;
+
+
+
+static void procResult(cache_waiting_t *ptr, rq_blacklist_status_t status)
+{
+	struct timeval tv;
+	cache_entry_t *entry;
+ 	
+	// will need to remove the 'waiting' object from the list... which means
+	// that the waiting object will need a pointer to the control structure.
+ 	assert(ptr);
+	assert(ptr->blacklist);
+	assert(ptr->blacklist->waiting);
+	ll_remove(ptr->blacklist->waiting, ptr);
+
+	assert(ptr->ip != 0);
+
+	// we need to make an entry in the cache for this entry...
+	entry = (cache_entry_t *) malloc(sizeof(cache_entry_t));
+	entry->ip = ptr->ip;
+	entry->status = status;
+	
+	// determine the expiry.
+	assert(ptr->blacklist->expires > 0);
+	gettimeofday(&tv, NULL);
+	entry->expires = tv.tv_sec + ptr->blacklist->expires;
+
+	// place it at the top.
+	assert(ptr->blacklist->cache);
+	ll_push_head(ptr->blacklist->cache, entry);
+
+	// call the handler that was saved.
+	assert(ptr->handler);
+	ptr->handler(status, ptr->arg);
+}
+
+
+static void cmdInvalid(cache_waiting_t *ptr, void *data, risp_length_t len)
+{
+	// this callback is called if we have an invalid command.  We shouldn't be receiving any invalid commands.
+	unsigned char *cast;
+
+	assert(ptr != NULL);
+	assert(data != NULL);
+	assert(len > 0);
+	
+	cast = (unsigned char *) data;
+	printf("Received invalid (%d): [%u, %u, %u]\n", len, cast[0], cast[1], cast[2]);
+	assert(0);
+}
+
+// This callback function is to be fired when the CMD_CLEAR command is 
+// received.  It should clear off any data received and stored in variables 
+// and flags.  In otherwords, after this is executed, the node structure 
+// should be in a predictable state.
+static void cmdClear(cache_waiting_t *ptr) 
+{
+ 	assert(ptr);
+ 	// nothing really to clear.
+}
+
+
+static void cmdAccept(cache_waiting_t *ptr)
+{
+	procResult(ptr, BLACKLIST_ACCEPT);
+}
+
+static void cmdDeny(cache_waiting_t *ptr)
+{
+	procResult(ptr, BLACKLIST_DENY);
+}
+
+
+
+
 
 
 
@@ -54,6 +131,12 @@ void rq_blacklist_init(rq_blacklist_t *blacklist, rq_t *rq, const char *queue, i
   blacklist->waiting = (list_t *) malloc(sizeof(list_t));
   ll_init(blacklist->waiting);
 
+	blacklist->risp = risp_init();
+	assert(blacklist->risp != NULL);
+	risp_add_invalid(blacklist->risp, cmdInvalid);
+	risp_add_command(blacklist->risp, BL_CMD_CLEAR, 	 &cmdClear);
+	risp_add_command(blacklist->risp, BL_CMD_ACCEPT,   &cmdAccept);
+ 	risp_add_command(blacklist->risp, BL_CMD_DENY,     &cmdDeny);
 }
 
 
@@ -69,6 +152,10 @@ void rq_blacklist_free(rq_blacklist_t *blacklist)
 
 	blacklist->rq = NULL;
 	blacklist->queue = NULL;
+
+	assert(blacklist->risp);
+	risp_shutdown(blacklist->risp);
+	blacklist->risp = NULL;
 
 	while ((tmp = ll_pop_head(blacklist->cache))) {
 		free(tmp);
@@ -91,21 +178,32 @@ static rq_blacklist_id_t next_id(rq_blacklist_t *blacklist)
 	if (waiting) { id = waiting->id + 1; }
 	else         { id = 1; }
 
+	assert(id > 0);
 	return(id);
 }
 
 
 //-----------------------------------------------------------------------------
 // Handle the response from the blacklist service.
-static void blacklist_handler(rq_message_t *reply, void *arg)
+static void blacklist_handler(rq_message_t *reply)
 {
-	cache_waiting_t *waiting = arg;
+	cache_waiting_t *waiting;
+	int processed;
 
 	assert(reply);
+	waiting = reply->arg;
 	assert(waiting);
 
-	// not sure what to do with the reply yet.
-	assert(0);
+	assert(waiting->msg == NULL);
+	waiting->msg = reply;
+	
+	assert(reply->data);
+	assert(waiting->blacklist);
+	assert(waiting->blacklist->risp);
+	processed = risp_process(waiting->blacklist->risp, waiting, BUF_LENGTH(reply->data), (risp_char_t *) BUF_DATA(reply->data));
+	assert(processed == BUF_LENGTH(reply->data));
+
+	waiting->msg = NULL;
 }
 
 
@@ -116,8 +214,11 @@ static void blacklist_handler(rq_message_t *reply, void *arg)
 //       this function exits (if the result is already cached), so dont put
 //       any important initialization of the passed in object after this call
 //       is made.
-rq_blacklist_id_t rq_blacklist_check
-	(rq_blacklist_t *blacklist, struct sockaddr *address, int socklen, void (*handler)(rq_blacklist_status_t status, void *arg), void *arg)
+rq_blacklist_id_t rq_blacklist_check(
+	rq_blacklist_t *blacklist,
+	struct sockaddr *address,
+	int socklen,
+	void (*handler)(rq_blacklist_status_t status, void *arg), void *arg)
 {
 	struct sockaddr_in *sin;
 	ev_uint32_t ip;
@@ -182,20 +283,29 @@ rq_blacklist_id_t rq_blacklist_check
 	waiting->ip = ip;
 	waiting->arg = arg;
 	waiting->blacklist = blacklist;
+	waiting->msg = NULL;
+	waiting->handler = handler;
 	ll_push_tail(blacklist->waiting, waiting);
 
-	// now send the message
+	// now create a message object so we can send the message
 	assert(blacklist->queue);
 	assert(blacklist->rq);
 	msg = rq_msg_new(blacklist->rq, NULL);
+	assert(msg);
+	assert(msg->data);
+
+	// apply the queue that we are sending a request for.
 	rq_msg_setqueue(msg, blacklist->queue);
-	
+
+	// build the command payload.
 	rq_msg_addcmd(msg, BL_CMD_CLEAR);
-	rq_msg_addcmd_int(msg, BL_CMD_IP, ip);
+// 	rq_msg_addcmd(msg, BL_CMD_NOP);
+	rq_msg_addcmd_largeint(msg, BL_CMD_IP, ip);
 	rq_msg_addcmd(msg, BL_CMD_CHECK);
 
 	// message has been prepared, so send it.
-	rq_send(blacklist->rq, msg, blacklist_handler, waiting);
+	// TODO: add fail handler.
+	rq_send(msg, blacklist_handler, NULL, waiting);
 	msg = NULL;
 
 	return(id);
